@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: codesync-api
+    runtime: docker
+    dockerfilePath: ./engine/Dockerfile
+    dockerContext: ./engine
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: CODESYNC_API_KEYS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

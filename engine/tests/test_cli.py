@@ -112,7 +112,7 @@ def model(monkeypatch, scripted):
     def install(*replies):
         client = scripted(*replies)
         monkeypatch.setattr(
-            "codesync.cli.create_client", lambda *args, **kwargs: client
+            "codesync.cliargs.create_client", lambda *args, **kwargs: client
         )
         return client
 
@@ -234,14 +234,14 @@ def test_refine_fails_on_an_unusable_reply(capsys, inventory_project, model):
 def test_refine_without_an_api_key_explains_what_to_set(
     capsys, monkeypatch, inventory_project
 ):
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     code, _, err = run(
         capsys, "refine", str(inventory_project), "inventory.pricing.apply_discount"
     )
 
     assert code == 2
-    assert "DEEPSEEK_API_KEY" in err
+    assert "GEMINI_API_KEY" in err
 
 
 def test_refine_rejects_a_class(capsys, inventory_project, model):

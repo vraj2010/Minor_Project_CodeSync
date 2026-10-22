@@ -7,10 +7,18 @@ from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 
+from . import varcli
 from .batch import load_tasks
+from .cliargs import (
+    add_model_arguments,
+    add_project_arguments,
+    create_model_client,
+    load_index,
+    print_rows,
+)
 from .context import DEFAULT_BUDGET, DEFAULT_GOAL, ContextMode, Section, build_context
 from .index import ProjectIndex, build_index
-from .llm import PROVIDERS, ChatClient, ProviderError, create_client
+from .llm import ProviderError
 from .prompts import build_messages
 from .references import Confidence, find_references
 from .refine import RefineResult, append_record, refine
@@ -49,14 +57,14 @@ def _build_parser() -> argparse.ArgumentParser:
     index_parser = subcommands.add_parser(
         "index", help="index a project and report what was found"
     )
-    _add_project_arguments(index_parser)
+    add_project_arguments(index_parser)
     index_parser.add_argument(
         "--json", action="store_true", help="emit the full index as JSON"
     )
     index_parser.set_defaults(handler=_cmd_index)
 
     symbols_parser = subcommands.add_parser("symbols", help="list the indexed symbols")
-    _add_project_arguments(symbols_parser)
+    add_project_arguments(symbols_parser)
     symbols_parser.add_argument("--module", help="restrict to one dotted module name")
     symbols_parser.add_argument(
         "--kind",
@@ -74,7 +82,7 @@ def _build_parser() -> argparse.ArgumentParser:
     at_parser = subcommands.add_parser(
         "at", help="name the symbol that encloses a line, given as PATH:LINE"
     )
-    _add_project_arguments(at_parser)
+    add_project_arguments(at_parser)
     at_parser.add_argument(
         "location", help="source location, for example app/models.py:42"
     )
@@ -83,7 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
     usages_parser = subcommands.add_parser(
         "usages", help="list every place in the project that uses a symbol"
     )
-    _add_project_arguments(usages_parser)
+    add_project_arguments(usages_parser)
     usages_parser.add_argument("target", help="qualified name or PATH:LINE")
     usages_parser.add_argument(
         "--json", action="store_true", help="emit the usages as JSON"
@@ -93,7 +101,7 @@ def _build_parser() -> argparse.ArgumentParser:
     context_parser = subcommands.add_parser(
         "context", help="show the prompt a refinement would send, without sending it"
     )
-    _add_project_arguments(context_parser)
+    add_project_arguments(context_parser)
     context_parser.add_argument("target", help="qualified name or PATH:LINE")
     _add_context_arguments(context_parser)
     context_parser.set_defaults(handler=_cmd_context)
@@ -101,10 +109,10 @@ def _build_parser() -> argparse.ArgumentParser:
     refine_parser = subcommands.add_parser(
         "refine", help="ask a model to rewrite a function and show the result as a diff"
     )
-    _add_project_arguments(refine_parser)
+    add_project_arguments(refine_parser)
     refine_parser.add_argument("target", help="qualified name or PATH:LINE")
     _add_context_arguments(refine_parser)
-    _add_model_arguments(refine_parser)
+    add_model_arguments(refine_parser)
     _add_log_arguments(refine_parser)
     refine_parser.add_argument(
         "--output", type=Path, help="also write the diff to this file"
@@ -119,23 +127,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     batch_parser.add_argument("tasks", type=Path, help="JSON file listing the tasks")
     _add_context_arguments(batch_parser)
-    _add_model_arguments(batch_parser)
+    add_model_arguments(batch_parser)
     _add_log_arguments(batch_parser)
     batch_parser.add_argument(
         "--patches", type=Path, help="write each diff into this directory"
     )
     batch_parser.set_defaults(handler=_cmd_batch)
 
+    varcli.register(subcommands)
     return parser
-
-
-def _add_project_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("root", help="path to the project")
-    parser.add_argument(
-        "--no-gitignore",
-        action="store_true",
-        help="index files that the project's .gitignore excludes",
-    )
 
 
 def _add_context_arguments(parser: argparse.ArgumentParser) -> None:
@@ -157,24 +157,6 @@ def _add_context_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--provider",
-        default="deepseek",
-        help=f"one of {', '.join(PROVIDERS)}, or any name together with --base-url",
-    )
-    parser.add_argument("--model", help="model name, if not the provider's default")
-    parser.add_argument("--base-url", help="URL of an OpenAI-compatible API")
-    parser.add_argument(
-        "--api-key-env", help="environment variable that holds the API key"
-    )
-    parser.add_argument("--temperature", type=float, default=0.2)
-    parser.add_argument("--max-tokens", type=int, default=2048)
-    parser.add_argument(
-        "--timeout", type=float, default=120.0, help="seconds to wait for a reply"
-    )
-
-
 def _add_log_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--log",
@@ -186,7 +168,7 @@ def _add_log_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
-    index = _load(args)
+    index = load_index(args)
     if args.json:
         print(json.dumps(index.to_dict(), indent=2))
         return 0
@@ -194,7 +176,7 @@ def _cmd_index(args: argparse.Namespace) -> int:
     summary = index.summary()
     rows = [("root", str(index.root))]
     rows += [(label, str(summary[key])) for key, label in _SUMMARY_LABELS]
-    _print_rows(rows)
+    print_rows(rows)
 
     if index.duplicates:
         print(f"\nduplicate module names ({len(index.duplicates)})")
@@ -209,7 +191,7 @@ def _cmd_index(args: argparse.Namespace) -> int:
 
 
 def _cmd_symbols(args: argparse.Namespace) -> int:
-    index = _load(args)
+    index = load_index(args)
     selected = [
         symbol
         for symbol in index.table.symbols
@@ -231,7 +213,7 @@ def _cmd_symbols(args: argparse.Namespace) -> int:
 
 
 def _cmd_at(args: argparse.Namespace) -> int:
-    index = _load(args)
+    index = load_index(args)
     relpath, lineno = parse_location(args.location, index.root)
 
     if index.table.module_at(relpath) is None:
@@ -249,7 +231,7 @@ def _cmd_at(args: argparse.Namespace) -> int:
 
 
 def _cmd_usages(args: argparse.Namespace) -> int:
-    index = _load(args)
+    index = load_index(args)
     target = find_symbol(index, args.target)
     references = find_references(Resolver(index), target)
 
@@ -285,7 +267,7 @@ def _cmd_usages(args: argparse.Namespace) -> int:
 
 
 def _cmd_context(args: argparse.Namespace) -> int:
-    index = _load(args)
+    index = load_index(args)
     target = find_refinable(index, args.target)
     context = build_context(
         Resolver(index),
@@ -295,7 +277,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
         budget=args.budget,
     )
 
-    _print_rows(
+    print_rows(
         [
             ("target", f"{target.qualname} ({target.location})"),
             ("mode", context.mode.value),
@@ -311,8 +293,8 @@ def _cmd_context(args: argparse.Namespace) -> int:
 
 
 def _cmd_refine(args: argparse.Namespace) -> int:
-    client = _client(args)
-    index = _load(args)
+    client = create_model_client(args)
+    index = load_index(args)
     target = find_refinable(index, args.target)
     try:
         result = refine(
@@ -345,7 +327,7 @@ def _cmd_refine(args: argparse.Namespace) -> int:
 
 def _cmd_batch(args: argparse.Namespace) -> int:
     tasks = load_tasks(args.tasks)
-    client = _client(args)
+    client = create_model_client(args)
     projects: dict[Path, tuple[ProjectIndex, Resolver]] = {}
     outcomes: Counter[str] = Counter()
     width = max((len(task.target) for task in tasks), default=0)
@@ -398,18 +380,6 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     return 0
 
 
-def _client(args: argparse.Namespace) -> ChatClient:
-    return create_client(
-        args.provider,
-        model=args.model,
-        base_url=args.base_url,
-        api_key_env=args.api_key_env,
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-        timeout=args.timeout,
-    )
-
-
 def _report(result: RefineResult) -> None:
     context = result.context
     rows = [
@@ -430,7 +400,7 @@ def _report(result: RefineResult) -> None:
             )
         rows.append(("model", f"{completion.model}, {completion.latency:.1f}s{usage}"))
     rows.append(("outcome", f"{result.outcome.value}  {_detail(result)}".rstrip()))
-    _print_rows(rows)
+    print_rows(rows)
 
 
 def _detail(result: RefineResult) -> str:
@@ -452,16 +422,6 @@ def _count_sections(sections: Iterable[Section]) -> list[str]:
     return [
         kind if count == 1 else f"{kind} ({count})" for kind, count in counts.items()
     ]
-
-
-def _load(args: argparse.Namespace) -> ProjectIndex:
-    return build_index(Path(args.root), use_gitignore=not args.no_gitignore)
-
-
-def _print_rows(rows: list[tuple[str, str]]) -> None:
-    width = max(len(label) for label, _ in rows)
-    for label, value in rows:
-        print(f"{label:<{width}}  {value}")
 
 
 def _print_symbols(symbols: list[Symbol], indent: str = "") -> None:
