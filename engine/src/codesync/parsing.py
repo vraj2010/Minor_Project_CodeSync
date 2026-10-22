@@ -1,6 +1,7 @@
 """Reading and parsing a single source file."""
 
 import ast
+import io
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,14 @@ class SourceError(Exception):
 def read_source(path: Path) -> str:
     with tokenize.open(path) as handle:
         return handle.read()
+
+
+def read_exact_source(path: Path) -> str:
+    """Like read_source, but line endings are left as they are on disk so an
+    edit can be written back without converting the whole file."""
+    raw = path.read_bytes()
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
+    return raw.decode(encoding)
 
 
 def load_module(path: Path, relpath: str) -> tuple[ast.Module, str]:

@@ -115,6 +115,11 @@ class SymbolTable:
         return sorted(self._modules.values(), key=lambda info: info.name)
 
     @property
+    def files(self) -> list[ModuleInfo]:
+        """Every indexed file, including one whose module name is shadowed."""
+        return sorted(self._modules_by_path.values(), key=lambda info: info.relpath)
+
+    @property
     def symbols(self) -> list[Symbol]:
         return sorted(
             (symbol for group in self._definitions.values() for symbol in group),
