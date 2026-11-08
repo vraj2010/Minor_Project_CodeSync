@@ -1,0 +1,29 @@
+{
+  "root": "project",
+  "tasks": [
+    {"target": "ledger.parsing.parse_row", "goal": "Rewrite this with clearer, more modern parameter names and a cleaner interface."},
+    {"target": "ledger.parsing.parse_lines", "goal": "Simplify this as far as you can."},
+    {"target": "ledger.parsing.parse_amount", "goal": "Make this shorter and more idiomatic."},
+    {"target": "ledger.parsing.parse_flag", "goal": "Make this more robust."},
+    {"target": "ledger.parsing.iter_rows", "goal": "Simplify this."},
+    {"target": "ledger.pricing.round_money", "goal": "Simplify this and remove anything unnecessary."},
+    {"target": "ledger.pricing.apply_discount", "goal": "Give the parameters better names and make the validation friendlier."},
+    {"target": "ledger.pricing.tax_for", "goal": "Improve the interface."},
+    {"target": "ledger.pricing.split_evenly", "goal": "Make this easier to read."},
+    {"target": "ledger.pricing.bulk_price", "goal": "Make the result more informative."},
+    {"target": "ledger.pricing.price_band", "goal": "Use a cleaner representation for the bands."},
+    {"target": "ledger.models.Invoice.add", "goal": "Follow the convention that a mutating method returns nothing."},
+    {"target": "ledger.models.Invoice.remove", "goal": "Make this shorter."},
+    {"target": "ledger.store.Repository.get", "goal": "Simplify this."},
+    {"target": "ledger.store.Repository.find", "goal": "Simplify the interface."},
+    {"target": "ledger.store.Repository.delete", "goal": "Simplify this."},
+    {"target": "ledger.report.summarize", "goal": "Keep only the fields a summary really needs."},
+    {"target": "ledger.report.top_items", "goal": "Make this more efficient."},
+    {"target": "ledger.report.aging", "goal": "Return something more self-explanatory."},
+    {"target": "ledger.text.truncate", "goal": "Make calls to this easier to read."},
+    {"target": "ledger.text.slugify", "goal": "Simplify the pattern."},
+    {"target": "ledger.dates.is_overdue", "goal": "Simplify this."},
+    {"target": "ledger.rates.fetch_rate", "goal": "Remove anything unnecessary."},
+    {"target": "ledger.app.pay", "goal": "Make the error handling more general."}
+  ]
+}

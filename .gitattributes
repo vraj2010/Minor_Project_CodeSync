@@ -1,0 +1,4 @@
+# Fixtures are compared byte for byte, so a Windows checkout must not turn
+# their line endings into CRLF.
+engine/tests/fixtures/** text eol=lf
+engine/experiments/** text eol=lf

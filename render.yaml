@@ -11,3 +11,16 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # The address of the site below, so its pages may call this API.
+      - key: CODESYNC_CORS_ORIGINS
+        sync: false
+  - type: web
+    name: codesync-web
+    runtime: static
+    rootDir: web
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      # The address of the API above, built into the page.
+      - key: VITE_API_URL
+        sync: false

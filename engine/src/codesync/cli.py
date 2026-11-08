@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 
-from . import varcli
+from . import safecli, varcli
 from .batch import load_tasks
 from .cliargs import (
     add_model_arguments,
@@ -135,6 +135,7 @@ def _build_parser() -> argparse.ArgumentParser:
     batch_parser.set_defaults(handler=_cmd_batch)
 
     varcli.register(subcommands)
+    safecli.register(subcommands)
     return parser
 
 

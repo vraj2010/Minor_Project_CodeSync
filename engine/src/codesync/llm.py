@@ -1,11 +1,13 @@
 """Talking to Google's Gemini over its OpenAI-compatible API."""
 
-import os
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
+
+from . import envfile
+from .envfile import setting
 
 KEY_ENV = "GEMINI_API_KEY"
 MODEL_ENV = "GEMINI_MODEL"
@@ -133,17 +135,21 @@ def create_client(
     timeout: float = 120.0,
     retries: int = 4,
 ) -> ChatClient:
-    """A Gemini client, using the key in GEMINI_API_KEY.
+    """A Gemini client, using the key in GEMINI_API_KEY, from the environment or
+    from the engine's `.env` file.
 
     The model comes from the argument, then GEMINI_MODEL, then the default.
     GEMINI_BASE_URL sends the requests to another address, such as a gateway."""
-    api_key = os.environ.get(KEY_ENV)
+    api_key = setting(KEY_ENV)
     if not api_key:
-        raise ProviderError(f"set the {KEY_ENV} environment variable to your API key")
+        raise ProviderError(
+            f"set the {KEY_ENV} environment variable to your API key, "
+            f"or put it in {envfile.ENV_FILE}"
+        )
 
     return ChatClient(
-        os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL,
-        model or os.environ.get(MODEL_ENV) or DEFAULT_MODEL,
+        setting(BASE_URL_ENV) or DEFAULT_BASE_URL,
+        model or setting(MODEL_ENV) or DEFAULT_MODEL,
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,

@@ -1,9 +1,14 @@
 """The CodeSync web API.
 
-A client uploads a repository (or names a public one on GitHub), browses the
-variables found in it, and asks for them to be described by a hosted model.
-Describing is a background job, because it takes minutes on a large project."""
+A client uploads a repository (or names a public one on GitHub), browses what
+was found in it, and has its functions rewritten and checked. Anything that calls
+a hosted model is a background job, because it takes too long for one request.
 
+The service reads uploaded code and never runs it. Rewrites are held to every
+check that does not need to run the code, and a report says plainly that the
+tests were not run. Only a server started for local use can run them."""
+
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,16 +27,26 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..llm import ModelClient, ProviderError, create_client
+from ..context import DEFAULT_GOAL
+from ..envfile import setting
+from ..impact import analyze_impact, dependency_map, is_test
+from ..llm import KEY_ENV, ModelClient, ProviderError, create_client
+from ..response import ResponseError
+from ..safe import DEFAULT_FIXES
+from ..splice import SpliceError
+from ..symbols import SymbolKind
+from ..targets import TargetError, find_refinable, find_symbol
 from ..variables import VariableKind
 from .auth import authenticate, request_key
 from .jobs import BudgetExceeded, JobConflict, JobManager
+from .refinement import check_rewrite, describe_symbol, options_for
 from .settings import Settings
 from .store import LimitReached, NotFound, ProjectState, ProjectStore
 from .uploads import Limits, UploadError, extract_python_files, fetch_github_archive
 
 _ACCESS_LIMIT = 500
 _UPLOAD_OVERHEAD = 1024 * 1024
+_MAX_REWRITE = 200_000
 
 
 class GithubSource(BaseModel):
@@ -50,6 +65,23 @@ class AnnotateRequest(BaseModel):
     )
 
 
+class VerifyRequest(BaseModel):
+    target: str = Field(description="qualified name of the function")
+    code: str = Field(
+        max_length=_MAX_REWRITE, description="the new definition of the function"
+    )
+
+
+class ImproveRequest(BaseModel):
+    target: str = Field(description="qualified name of the function")
+    goal: str = Field(
+        default=DEFAULT_GOAL, max_length=2000, description="what the rewrite is for"
+    )
+    fixes: int = Field(
+        default=DEFAULT_FIXES, ge=0, le=DEFAULT_FIXES, description="retries allowed"
+    )
+
+
 def default_client_factory() -> ModelClient:
     return create_client(max_tokens=4096)
 
@@ -63,6 +95,7 @@ def create_app(
     settings = settings or Settings.from_env()
     store = ProjectStore(settings)
     jobs = JobManager(settings, client_factory)
+    checks = threading.BoundedSemaphore(settings.concurrent_checks)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -73,7 +106,7 @@ def create_app(
     app = FastAPI(
         title="CodeSync",
         version=__version__,
-        description="Project-aware variable mapping for Python repositories.",
+        description="Project-aware code refinement for Python repositories.",
         lifespan=lifespan,
     )
     if settings.cors_origins:
@@ -119,6 +152,14 @@ def create_app(
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok", "version": __version__}
+
+    @app.get("/v1/capabilities", tags=["projects"])
+    def capabilities(who: str = Depends(owner)) -> dict:
+        """What this server can do, so a client can say so up front."""
+        return {
+            "runs_tests": settings.run_tests,
+            "model_configured": bool(setting(KEY_ENV)),
+        }
 
     @app.post("/v1/projects/upload", status_code=201, tags=["projects"])
     def upload_project(file: UploadFile, who: str = Depends(owner)) -> dict:
@@ -240,6 +281,97 @@ def create_app(
         document = project.variable_map.to_dict(accesses=accesses)
         document["root"] = project.name
         return document
+
+    @app.get("/v1/projects/{project_id}/symbols", tags=["analysis"])
+    def list_symbols(
+        project_id: str,
+        q: str | None = Query(None, description="text the qualified name contains"),
+        include_tests: bool = False,
+        limit: int = Query(200, ge=1, le=1000),
+        offset: int = Query(0, ge=0),
+        who: str = Depends(owner),
+    ) -> dict:
+        """The functions and methods that can be rewritten."""
+        table = project_of(project_id, who).index.table
+        needle = (q or "").lower()
+        found = [
+            symbol
+            for symbol in table.symbols
+            if symbol.kind in (SymbolKind.FUNCTION, SymbolKind.METHOD)
+            and not symbol.is_nested
+            and (include_tests or not is_test(symbol))
+            and needle in symbol.qualname.lower()
+        ]
+        return {
+            "total": len(found),
+            "items": [item.to_dict() for item in found[offset : offset + limit]],
+        }
+
+    @app.get("/v1/projects/{project_id}/symbols/{qualname:path}", tags=["analysis"])
+    def get_symbol(project_id: str, qualname: str, who: str = Depends(owner)) -> dict:
+        """One function: its code and its contract."""
+        project = project_of(project_id, who)
+        target = _refinable(project, qualname)
+        return describe_symbol(project.resolver, target)
+
+    @app.get("/v1/projects/{project_id}/impact/{qualname:path}", tags=["analysis"])
+    def get_impact(project_id: str, qualname: str, who: str = Depends(owner)) -> dict:
+        """What breaks if this function changes, and which tests would notice."""
+        project = project_of(project_id, who)
+        try:
+            target = find_symbol(project.index, qualname)
+        except TargetError as error:
+            raise HTTPException(404, str(error)) from None
+        return analyze_impact(project.resolver, target).to_dict()
+
+    @app.get("/v1/projects/{project_id}/dependencies", tags=["analysis"])
+    def get_dependencies(project_id: str, who: str = Depends(owner)) -> list[dict]:
+        """Which modules import which."""
+        resolver = project_of(project_id, who).resolver
+        return [item.to_dict() for item in dependency_map(resolver)]
+
+    @app.post("/v1/projects/{project_id}/verify", tags=["refinement"])
+    def verify(project_id: str, body: VerifyRequest, who: str = Depends(owner)) -> dict:
+        """Check a rewrite written by hand. No model is involved."""
+        project = project_of(project_id, who)
+        target = _refinable(project, body.target)
+        if not checks.acquire(timeout=settings.check_timeout):
+            raise HTTPException(429, "too many checks are running; try again shortly")
+        try:
+            return check_rewrite(project, target, body.code, options_for(settings))
+        except (ResponseError, SpliceError, ValueError) as error:
+            raise HTTPException(422, f"the rewrite cannot be used: {error}") from None
+        finally:
+            checks.release()
+
+    @app.post("/v1/projects/{project_id}/improve", status_code=202, tags=["refinement"])
+    def improve(
+        project_id: str, body: ImproveRequest, who: str = Depends(owner)
+    ) -> dict:
+        """Start a model rewriting one function, with the checks and retries."""
+        project = project_of(project_id, who)
+        target = _refinable(project, body.target)
+        try:
+            job = jobs.submit_improvement(
+                project,
+                target,
+                goal=body.goal,
+                fixes=body.fixes,
+                options=options_for(settings),
+            )
+        except ProviderError as error:
+            raise HTTPException(503, str(error)) from None
+        except JobConflict as error:
+            raise HTTPException(409, str(error)) from None
+        except BudgetExceeded as error:
+            raise HTTPException(429, str(error)) from None
+        return job.to_dict()
+
+    def _refinable(project: ProjectState, qualname: str):
+        try:
+            return find_refinable(project.index, qualname)
+        except TargetError as error:
+            raise HTTPException(404, str(error)) from None
 
     @app.post("/v1/projects/{project_id}/annotate", status_code=202, tags=["jobs"])
     def annotate(

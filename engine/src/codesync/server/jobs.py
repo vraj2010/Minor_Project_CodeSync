@@ -1,5 +1,5 @@
-"""Annotation jobs: planning a run, holding it to its limits and running it
-in the background."""
+"""Background jobs: planning a run, holding it to its limits and running it.
+A job either describes a project's variables or improves one function."""
 
 import secrets
 import threading
@@ -17,7 +17,11 @@ from ..annotate import (
     run_annotations,
 )
 from ..llm import ModelClient
+from ..safe import Decision, refine_safely
+from ..symbols import Symbol
 from ..varmap import parse_kinds
+from ..verify import VerifyOptions
+from .refinement import improvement_payload
 from .settings import Settings
 from .store import NotFound, ProjectState
 
@@ -58,17 +62,23 @@ class Job:
     usage: dict | None = None
     error: str | None = None
     finished: datetime | None = None
+    kind: str = "annotate"
+    target: str | None = None
+    result: dict | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "project_id": self.project_id,
+            "kind": self.kind,
+            "target": self.target,
             "status": self.status.value,
             "model": self.model,
             "progress": {"done": self.done_requests, "total": self.total_requests},
             "plan": self.plan,
             "usage": self.usage,
+            "result": self.result,
             "error": self.error,
             "created": self.created.isoformat(timespec="seconds"),
             "finished": self.finished.isoformat(timespec="seconds")
@@ -143,6 +153,50 @@ class JobManager:
         self._pool.submit(self._run, job, project, plan, client)
         return job
 
+    def submit_improvement(
+        self,
+        project: ProjectState,
+        target: Symbol,
+        *,
+        goal: str,
+        fixes: int,
+        options: VerifyOptions,
+    ) -> Job:
+        """Queue a rewrite of one function. The most requests it could make are
+        reserved up front, and what it did not use is handed back."""
+        client = self._client_factory()
+        job = Job(
+            id=secrets.token_urlsafe(9),
+            project_id=project.id,
+            owner=project.owner,
+            created=self._clock(),
+            model=client.model,
+            kind="improve",
+            target=target.qualname,
+            total_requests=fixes + 1,
+        )
+        with self._lock:
+            if any(
+                item.project_id == project.id and item.status.active
+                for item in self._jobs.values()
+            ):
+                client.close()
+                raise JobConflict("this project already has a job running")
+            self._jobs[job.id] = job
+
+        try:
+            self._reserve(project.owner, job.total_requests)
+        except BaseException:
+            with self._lock:
+                self._jobs.pop(job.id, None)
+            client.close()
+            raise
+
+        self._pool.submit(
+            self._run_improvement, job, project, target, goal, fixes, options, client
+        )
+        return job
+
     def get(self, job_id: str, owner: str) -> Job:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -190,6 +244,44 @@ class JobManager:
             self._refund(job.owner, job.total_requests - job.done_requests)
         else:
             self._finish(job, project, plan, result)
+        finally:
+            client.close()
+            job.finished = self._clock()
+
+    def _run_improvement(
+        self,
+        job: Job,
+        project: ProjectState,
+        target: Symbol,
+        goal: str,
+        fixes: int,
+        options: VerifyOptions,
+        client: ModelClient,
+    ) -> None:
+        job.status = JobStatus.RUNNING
+        try:
+            result = refine_safely(
+                project.index,
+                target,
+                client,
+                goal=goal,
+                resolver=project.resolver,
+                options=options,
+                fixes=fixes,
+            )
+        except Exception as error:
+            job.status = JobStatus.FAILED
+            job.error = f"unexpected {type(error).__name__}: {error}"
+            self._refund(job.owner, job.total_requests)
+        else:
+            job.done_requests = len(result.attempts)
+            job.result = improvement_payload(result, project.resolver)
+            self._refund(job.owner, job.total_requests - job.done_requests)
+            if result.decision is Decision.FAILED:
+                job.status = JobStatus.FAILED
+                job.error = result.reason
+            else:
+                job.status = JobStatus.DONE
         finally:
             client.close()
             job.finished = self._clock()

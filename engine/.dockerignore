@@ -2,6 +2,7 @@
 .pytest_cache
 .ruff_cache
 .codesync
+.env
 **/__pycache__
 **/*.egg-info
 tests

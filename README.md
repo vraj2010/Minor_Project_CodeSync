@@ -13,17 +13,87 @@ Minor project, B.Tech Semester 7 — 23BCP142 and 23BCP516D.
 
 | Path | Contents |
 | --- | --- |
-| `engine/` | The `codesync` Python package: project analysis, variable map, model client, web API |
-| `render.yaml` | Blueprint that deploys the web API to Render |
+| `engine/` | The `codesync` Python package: project analysis, safety checks, model client, web API |
+| `engine/experiments/trapset/` | The trap set: a test project, 50 traps, 12 controls and a hidden test suite |
+| `web/` | The web interface: a React app with a side-by-side before and after view |
+| `render.yaml` | Blueprint that deploys the web API and the web interface to Render |
 
 ## Status
 
 | Phase | Weeks | State |
 | --- | --- | --- |
-| 1. Understanding code | 1–4 | Week 1 done; import resolution and usage finding done early |
+| 1. Understanding code | 1–4 | Done: repository map, dependency map, usages, covering tests, `impact` |
 | 2. Bringing in the AI | 5–7 | Done: AI variable mapping, hosted web API, function rewriting as a diff |
-| 3. The safety checks | 8–11 | Not started |
-| 4. Interface and results | 12–14 | Not started |
+| 3. The safety checks | 8–11 | Done: contract, call-site, name, type and test checks, retry loop, undo |
+| 4. Interface and results | 12–14 | Interface and trap set done; the comparison is built but needs a Gemini key to run |
+
+## How a change is checked
+
+Nothing a check does touches the real project. The checks run cheapest first, and
+a suggestion that fails a cheap one never reaches the slow ones.
+
+| Check | The question it asks | Needs |
+| --- | --- | --- |
+| Contract | Does it still take the same inputs and give the same kind of output? | Syntax only |
+| Call sites | Does every caller, and every override, still fit? | Syntax only |
+| Names | Does everything the rewrite uses exist? | Syntax only |
+| Types | Did `mypy` find any new error? Errors that were already there do not count | A temporary copy |
+| Tests | Do the tests that reach this function still pass? | A temporary copy |
+
+A rewrite ends up `safe`, `unsafe` or `unconfirmed`. Unconfirmed means nothing
+failed but something that had to run could not, usually because no test reaches
+the function. It is treated as a refusal, because a tool that cannot confirm a
+change is safe should not keep it. `--allow-untested` accepts such a change.
+
+When a check fails, the model is told exactly what broke, as JSON, and gets up to
+three more tries. If it never gets there, the change is refused and the places
+that would have stopped working are named.
+
+Running tests means running the project's code. It happens in a temporary copy
+with a time limit, and anything in the environment that looks like a secret is
+left out, but that is not a security sandbox: only use it on code you trust.
+
+### What the checks can and cannot catch
+
+Measured on the trap set: fifty hand-written changes that each look reasonable and
+hide one break, and twelve harmless controls. A hidden test suite that the checks
+never see proves each trap is real and each control is harmless.
+
+| Category | Traps | Caught | Refused as unconfirmed | Missed |
+| --- | --- | --- | --- | --- |
+| Signature | 10 | 10 | 0 | 0 |
+| Return value | 10 | 9 | 0 | 1 |
+| Async and generators | 4 | 4 | 0 | 0 |
+| Exceptions | 6 | 4 | 0 | 2 |
+| Names | 6 | 6 | 0 | 0 |
+| Behaviour | 14 | 3 | 2 | 9 |
+| **Total** | **50** | **36** | **2** | **12** |
+
+Of the 12 controls, 11 were kept, none was wrongly refused, and 1 came back
+unconfirmed because no project test reaches it.
+
+The pattern is the honest result. Changes to the shape of a function are caught
+almost every time. Changes to what it does are caught only when one of the
+project's own tests exercises that behaviour: nine of the twelve misses are
+behaviour changes in branches its tests do not reach. The checks can only be as
+good as the tests behind them, and this project's tests were deliberately left at
+an ordinary level. These numbers describe this one small test project, written by
+the same people as the checks, and are not a claim about code in general.
+
+```bash
+codesync traps --validate   # prove the set itself with the hidden suite
+codesync traps              # score the checks
+```
+
+The four-way comparison runs the same 24 tasks with a plain model, then adding the
+project map, the checks and the retry loop, and counts how often each one keeps a
+change that quietly breaks the project. It needs a Gemini key, so it has no
+results yet. `--dry-run` shows the cost first.
+
+```bash
+codesync compare --dry-run
+codesync compare --output results.json
+```
 
 ## Phase 2 — the AI variable map
 
@@ -87,8 +157,20 @@ environment cannot be moved or copied; delete `.venv` and create it again.
 ### Connecting Gemini
 
 CodeSync calls Google's Gemini; nothing runs locally. Create a key at
-aistudio.google.com/apikey (the free tier needs no card). The key is read from
-the environment, never from a file.
+aistudio.google.com/apikey (the free tier needs no card).
+
+Copy `engine/.env.example` to `engine/.env` and paste the key after the equals
+sign. Every command then finds it, from any folder and in any terminal. Git
+ignores that file, so the key stays on your computer.
+
+```
+GEMINI_API_KEY=your-key
+```
+
+Only `engine/.env` is read: a `.env` in the current folder or in the project being
+checked is ignored, so one project cannot redirect your key. A value set in the
+terminal overrides the file for that window, and the key is never passed to the
+tests the checks run, nor visible to `pytest`.
 
 | Setting | Meaning |
 | --- | --- |
@@ -96,7 +178,7 @@ the environment, never from a file.
 | `GEMINI_MODEL` | the model to use; the built-in default is `gemini-3.8-flash` |
 | `GEMINI_BASE_URL` | send the requests through a gateway instead |
 
-In PowerShell, for the current window:
+To use a different key for one PowerShell window only:
 
 ```powershell
 $env:GEMINI_API_KEY = "your-key"
@@ -229,10 +311,59 @@ codesync usages path/to/project requests.utils.get_auth_from_url
 names the definitions enclosing a line, and `usages` lists every place a symbol
 is used. `codesync index --json` writes the whole table as JSON.
 
+### What breaks if this changes?
+
+```bash
+codesync impact path/to/project ledger.pricing.tax_for
+codesync deps path/to/project
+```
+
+`impact` follows the callers of a function outwards and lists the files affected
+and the tests that reach it, through helpers and pytest fixtures too. `deps` shows
+which modules import which.
+
+### Changing code safely
+
+```bash
+codesync verify path/to/project ledger.pricing.tax_for my_version.py
+codesync improve path/to/project ledger.pricing.tax_for --goal "Make this clearer." --apply
+codesync undo path/to/project
+```
+
+`verify` checks a rewrite you wrote yourself, with no model and no key. `improve`
+has the model rewrite the function, with the checks and the retries. Neither
+touches the project unless `--apply` is given, and then only if the change is
+kept. `undo` puts the file back byte for byte, and refuses if the file was edited
+after the change was applied.
+
+A refusal looks like this:
+
+```
+app.services.parser.parse_row: unsafe
+
+  FAIL  contract  0 ms
+  FAIL  call-sites  0 ms
+  pass  names  1 ms
+  skip  types  (not run, because an earlier check failed)
+  skip  tests  (not run, because an earlier check failed)
+
+what is wrong (5)
+  `sep` was renamed to `delimiter`
+  `strict` was removed
+  it no longer raises `RecordError`, which callers may be catching
+  app/services/parser.py:20: the call has no parameter `sep`
+  app/services/parser.py:30: the call has no parameter `sep`
+
+refused: 2 places would have stopped working
+  app/services/parser.py:20  parse_row(line, sep=sep)
+  app/services/parser.py:30  parse_row(line, sep=self.sep)
+```
+
 ### Refining a function
 
-Phase 2 also rewrites one function with the project's context and returns the
-result as a diff. Nothing is written to the project.
+`refine` rewrites one function with the project's context and returns the result
+as a diff, with no safety checks. Nothing is written to the project. `improve`,
+above, is the same thing with the checks.
 
 ```bash
 codesync context path/to/project inventory.pricing.apply_discount
@@ -247,6 +378,28 @@ comparison experiment needs.
 
 Each run is appended to `.codesync/runs.jsonl`: the context included and left
 out, the prompt, the reply, token counts and the diff.
+
+## The web interface
+
+Pick a function, see what depends on it, then rewrite it in a side-by-side editor
+and check the result. Checking your own version needs no Gemini key.
+
+In one terminal, start the engine for local use:
+
+```powershell
+cd engine
+$env:CODESYNC_ALLOW_ANONYMOUS = "1"
+$env:CODESYNC_RUN_TESTS = "1"
+codesync serve
+```
+
+In another, start the page and open http://localhost:5173:
+
+```bash
+cd web
+npm install
+npm run dev
+```
 
 ## Hosting it online
 
@@ -270,6 +423,8 @@ codesync serve
 | `CODESYNC_MAX_PROJECTS` | projects held per key, default 10 |
 | `CODESYNC_MAX_REQUESTS_PER_JOB` | model requests one job may make, default 300 |
 | `CODESYNC_DAILY_REQUESTS` | model requests per key per day, default 2000 |
+| `CODESYNC_RUN_TESTS` | `1` to run uploaded code's tests; only allowed with `CODESYNC_ALLOW_ANONYMOUS` |
+| `CODESYNC_CHECK_TIMEOUT` | seconds each slow check may take, default 60 |
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -279,7 +434,14 @@ codesync serve
 | `GET /v1/projects/{id}/variables/{name}` | one variable with every access and its code |
 | `GET /v1/projects/{id}/map` | the whole variable map as one document |
 | `POST /v1/projects/{id}/annotate` | start describing the variables; returns a job |
-| `GET /v1/jobs/{id}` | job progress and token usage |
+| `GET /v1/capabilities` | whether this server runs tests and has a model key |
+| `GET /v1/projects/{id}/symbols` | list the functions that can be rewritten |
+| `GET /v1/projects/{id}/symbols/{name}` | one function with its code and contract |
+| `GET /v1/projects/{id}/impact/{name}` | what breaks if a function changes |
+| `GET /v1/projects/{id}/dependencies` | which modules import which |
+| `POST /v1/projects/{id}/verify` | check a rewrite written by hand |
+| `POST /v1/projects/{id}/improve` | start a model rewriting a function; returns a job |
+| `GET /v1/jobs/{id}` | job progress, token usage and the result |
 | `DELETE /v1/jobs/{id}` | cancel a job |
 | `DELETE /v1/projects/{id}` | delete a project |
 
@@ -310,7 +472,9 @@ curl -H "X-API-Key: $KEY" $URL/v1/projects/$ID/map -o variable-map.json
 3. When asked for the secret values, set `CODESYNC_API_KEYS` to a long random
    string (`python -c "import secrets; print(secrets.token_urlsafe(32))"`), and
    `GEMINI_API_KEY` to your Gemini key.
-4. Deploy, then open `https://<your-service>.onrender.com/docs`.
+4. Set `VITE_API_URL` on `codesync-web` to the address of `codesync-api`, and
+   `CODESYNC_CORS_ORIGINS` on `codesync-api` to the address of `codesync-web`.
+5. Deploy, then open `https://<your-service>.onrender.com/docs`.
 
 On the free plan the service sleeps when idle, so the first request after a
 pause is slow, and projects live in memory and on a disk that is wiped on every
@@ -319,7 +483,10 @@ downloaded once it is described.
 
 ### What the service does with uploaded code
 
-It reads the code and never runs it. An archive is unpacked only for its `.py`
+It reads the code and never runs it, so on the hosted service a rewrite gets every
+check except the tests. A sound rewrite therefore comes back `unconfirmed`, and the
+report says the tests were not run. The server refuses to start with
+`CODESYNC_RUN_TESTS` unless it is also set up for local use. An archive is unpacked only for its `.py`
 files and root `.gitignore`; paths that climb out of the project, links, archives
 that expand past a limit and downloads from anywhere but GitHub are refused. Every
 project and job belongs to the key that made it and is invisible to others, a
@@ -334,4 +501,4 @@ runs one job at a time, and each key has a daily request budget.
 | 1–4 | Understanding code | Repository map and impact analysis: what breaks if this function changes |
 | 5–7 | Bringing in the AI | AI variable map, hosted API, context selection, a rewritten function as a diff |
 | 8–11 | The safety checks | Contract, call-site, type and test checks, plus the retry loop |
-| 12–14 | Interface and results | Web interface, ablation study and the trap set |
+| 12–14 | Interface and results | Web interface, four-way comparison and the trap set |
