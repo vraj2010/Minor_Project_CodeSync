@@ -4,6 +4,7 @@ Nothing here writes to the project. The result carries the patched text and
 a diff; applying it safely is the job of the checks that come after."""
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -91,10 +92,13 @@ def refine(
     mode: ContextMode = ContextMode.PROJECT,
     budget: int = DEFAULT_BUDGET,
     resolver: Resolver | None = None,
+    prior: Sequence[dict[str, str]] = (),
 ) -> RefineResult:
+    """One rewrite. `prior` continues a conversation: the earlier replies and
+    what was wrong with them, for a model being asked to try again."""
     resolver = resolver or Resolver(index)
     context = build_context(resolver, target, goal=goal, mode=mode, budget=budget)
-    messages = build_messages(context)
+    messages = [*build_messages(context), *prior]
 
     try:
         completion = client.complete(messages)

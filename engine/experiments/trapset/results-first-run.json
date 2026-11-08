@@ -1,0 +1,852 @@
+{
+  "summary": {
+    "traps": 50,
+    "caught": 36,
+    "unconfirmed": 2,
+    "missed": 12,
+    "caught_by_check": {
+      "contract": 28,
+      "types": 1,
+      "names": 6,
+      "tests": 1
+    },
+    "by_category": {
+      "signature": {
+        "caught": 10,
+        "unconfirmed": 0,
+        "kept": 0
+      },
+      "return value": {
+        "caught": 9,
+        "unconfirmed": 0,
+        "kept": 1
+      },
+      "async": {
+        "caught": 4,
+        "unconfirmed": 0,
+        "kept": 0
+      },
+      "exceptions": {
+        "caught": 4,
+        "unconfirmed": 0,
+        "kept": 2
+      },
+      "names": {
+        "caught": 6,
+        "unconfirmed": 0,
+        "kept": 0
+      },
+      "behaviour": {
+        "caught": 3,
+        "unconfirmed": 2,
+        "kept": 9
+      }
+    },
+    "controls": 12,
+    "controls_kept": 11,
+    "controls_refused": 0,
+    "controls_unconfirmed": 1
+  },
+  "results": [
+    {
+      "id": "C01",
+      "category": "control",
+      "target": "ledger.parsing.parse_lines",
+      "title": "A comprehension over cleaned lines",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 0.962,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C02",
+      "category": "control",
+      "target": "ledger.models.Invoice.subtotal",
+      "title": "A plain loop instead of a generator",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.733,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C03",
+      "category": "control",
+      "target": "ledger.pricing.tax_for",
+      "title": "A named intermediate value",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.558,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C04",
+      "category": "control",
+      "target": "ledger.text.slugify",
+      "title": "Find the words rather than replace the rest",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 0.976,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C05",
+      "category": "control",
+      "target": "ledger.store.Repository.numbers",
+      "title": "Name the keys explicitly",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 1.075,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C06",
+      "category": "control",
+      "target": "ledger.pricing.price_band",
+      "title": "A single if and elif chain",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 1.028,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C07",
+      "category": "control",
+      "target": "ledger.models.Invoice.count",
+      "title": "A plain loop",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.925,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C08",
+      "category": "control",
+      "target": "ledger.report.top_items",
+      "title": "A new optional parameter, leaving calls as they are",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 0.981,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C09",
+      "category": "control",
+      "target": "ledger.pricing.apply_discount",
+      "title": "The validation stated more clearly",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.81,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C10",
+      "category": "control",
+      "target": "ledger.text.initials",
+      "title": "Upper-case once at the end. No project test reaches this function",
+      "outcome": "unconfirmed",
+      "caught_by": null,
+      "seconds": 1.319,
+      "places": [],
+      "notes": [
+        "tests: no test reaches this function, so its behaviour cannot be checked"
+      ]
+    },
+    {
+      "id": "C11",
+      "category": "control",
+      "target": "ledger.models.Invoice.find",
+      "title": "A generator with a default",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 3.01,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "C12",
+      "category": "control",
+      "target": "ledger.report.render",
+      "title": "Build the lines in one expression",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.837,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T01",
+      "category": "signature",
+      "target": "ledger.parsing.parse_row",
+      "title": "A clearer parameter name, made keyword-only",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.003,
+      "places": [
+        "ledger/parsing.py:33  parse_row(stripped, sep=sep)",
+        "ledger/parsing.py:39  parse_row(line, sep)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T02",
+      "category": "signature",
+      "target": "ledger.parsing.parse_lines",
+      "title": "The separator is now always explicit",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.002,
+      "places": [
+        "ledger/app.py:15  parse_lines(text)",
+        "tests/test_parsing.py:18  parse_lines(\"pen,1\\n\\nink,2\\n\")"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T03",
+      "category": "signature",
+      "target": "ledger.pricing.tax_for",
+      "title": "The rate comes first, because it rarely changes",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.002,
+      "places": [
+        "ledger/pricing.py:24  tax_for(subtotal, rate)",
+        "tests/test_pricing.py:22  tax_for(100)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T04",
+      "category": "signature",
+      "target": "ledger.pricing.apply_discount",
+      "title": "A more descriptive parameter name",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.002,
+      "places": [
+        "ledger/app.py:31  apply_discount(item, percent=percent)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T05",
+      "category": "signature",
+      "target": "ledger.text.truncate",
+      "title": "The suffix is keyword-only, to make calls readable",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.002,
+      "places": [
+        "ledger/app.py:96  truncate(title, 10, \"..\")"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T06",
+      "category": "signature",
+      "target": "ledger.store.Repository.find",
+      "title": "A simpler lookup without the rarely used default",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.005,
+      "places": [
+        "ledger/app.py:52  repository.find(number, Invoice(number))"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T07",
+      "category": "signature",
+      "target": "ledger.models.Invoice.add",
+      "title": "Adding an item now states its quantity",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.004,
+      "places": [
+        "ledger/app.py:16  invoice.add(item)",
+        "ledger/app.py:25  Invoice(number).add(first).add(second)",
+        "ledger/app.py:25  Invoice(number).add(first)",
+        "ledger/app.py:31  result.add(apply_discount(item, percent=percent))",
+        "tests/test_models.py:5  Invoice(\"A1\").add(Item(\"pen\", 2.0, 3)).add(Item(\"ink\", 5.0))",
+        "tests/test_models.py:5  Invoice(\"A1\").add(Item(\"pen\", 2.0, 3))",
+        "tests/test_models.py:31  RecurringInvoice(\"R1\", cycles=2).add(Item(\"pen\", 2.0))",
+        "tests/test_pricing.py:26  Invoice(\"A\").add(Item(\"pen\", 100.0))",
+        "tests/test_report.py:6  Invoice(\"A1\").add(Item(\"pen\", 2.0, 3)).add(Item(\"ink\", 5.0))",
+        "tests/test_report.py:6  Invoice(\"A1\").add(Item(\"pen\", 2.0, 3))",
+        "tests/test_store.py:9  Invoice(\"A\").add(Item(\"pen\", 2.0))"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T08",
+      "category": "signature",
+      "target": "ledger.report.top_items",
+      "title": "A more useful default length",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.004,
+      "places": [
+        "tests/test_report.py:14  top_items(sample(), 1)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T09",
+      "category": "signature",
+      "target": "ledger.dates.due_date",
+      "title": "A shorter default payment term",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.002,
+      "places": [
+        "tests/test_text.py:12  due_date(date(2026, 1, 1), 10)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T10",
+      "category": "signature",
+      "target": "ledger.models.RecurringInvoice.total_with",
+      "title": "Recurring invoices do not need a rate here",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.003,
+      "places": [
+        "ledger/app.py:100  invoice.total_with(rate)",
+        "ledger/models.py:35  this method overrides `ledger.models.Invoice.total_with` and no longer matches it: that one is total_with(self, rate)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T11",
+      "category": "return value",
+      "target": "ledger.models.Invoice.add",
+      "title": "A mutating method should not return anything",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.013,
+      "places": [
+        "ledger/app.py:25  Invoice(number).add(first)",
+        "tests/test_models.py:5  Invoice(\"A1\").add(Item(\"pen\", 2.0, 3))",
+        "tests/test_models.py:31  RecurringInvoice(\"R1\", cycles=2).add(Item(\"pen\", 2.0))",
+        "tests/test_report.py:6  Invoice(\"A1\").add(Item(\"pen\", 2.0, 3))"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T12",
+      "category": "return value",
+      "target": "ledger.parsing.parse_row",
+      "title": "A plain tuple is lighter than an object",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.004,
+      "places": [
+        "ledger/parsing.py:33  parse_row(stripped, sep=sep)",
+        "ledger/parsing.py:39  parse_row(line, sep)",
+        "tests/test_parsing.py:13  parse_row(\"pen, 2.50, 3\")"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T13",
+      "category": "return value",
+      "target": "ledger.pricing.bulk_price",
+      "title": "Also report whether the bulk rate applied",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.005,
+      "places": [
+        "ledger/app.py:70  bulk_price(price, quantity)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T14",
+      "category": "return value",
+      "target": "ledger.report.summarize",
+      "title": "Payment state does not belong in a summary",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.005,
+      "places": [
+        "ledger/app.py:60  summarize(invoice)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T15",
+      "category": "return value",
+      "target": "ledger.store.Repository.delete",
+      "title": "Deleting needs no return value",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.006,
+      "places": [
+        "ledger/app.py:56  repository.delete(number)",
+        "tests/test_store.py:27  repository.delete(\"A\")"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T16",
+      "category": "return value",
+      "target": "ledger.pricing.price_band",
+      "title": "Numeric bands sort better than strings",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.006,
+      "places": [
+        "ledger/app.py:66  price_band(amount)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T17",
+      "category": "return value",
+      "target": "ledger.report.aging",
+      "title": "A named result is clearer than a pair",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.002,
+      "places": [
+        "ledger/app.py:75  aging(invoices)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T18",
+      "category": "return value",
+      "target": "ledger.pricing.split_evenly",
+      "title": "Yield the shares instead of building a list",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.003,
+      "places": [
+        "ledger/app.py:80  split_evenly(amount, parts)",
+        "tests/test_pricing.py:30  split_evenly(10.0, 2)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T19",
+      "category": "return value",
+      "target": "ledger.dates.is_overdue",
+      "title": "An early return reads more simply",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.001,
+      "places": [
+        "tests/test_text.py:16  is_overdue(date(2026, 1, 1), date(2026, 2, 1))"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T20",
+      "category": "return value",
+      "target": "ledger.parsing.parse_flag",
+      "title": "Hand back the normalised text, which is still truthy",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 3.638,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T21",
+      "category": "async",
+      "target": "ledger.rates.fetch_rate",
+      "title": "It never waits for anything, so it need not be async",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.002,
+      "places": [
+        "ledger/rates.py:13  fetch_rate(currency, rates)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T22",
+      "category": "async",
+      "target": "ledger.parsing.iter_rows",
+      "title": "A list comprehension is simpler than a generator",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.004,
+      "places": [
+        "ledger/app.py:21  iter_rows(lines)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T23",
+      "category": "async",
+      "target": "ledger.rates.convert_all",
+      "title": "Tidied, with one await lost on the way",
+      "outcome": "caught",
+      "caught_by": "types",
+      "seconds": 1.606,
+      "places": [
+        "ledger/rates.py:14  Unsupported operand types for * (\"float\" and \"Coroutine[Any, Any, float]\")  [operator]"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T24",
+      "category": "async",
+      "target": "ledger.rates.load_rates",
+      "title": "Ready for rates that come from a service",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.006,
+      "places": [
+        "ledger/app.py:92  load_rates()"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T25",
+      "category": "exceptions",
+      "target": "ledger.parsing.parse_amount",
+      "title": "Let float report its own error",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.008,
+      "places": [
+        "ledger/app.py:37  parse_amount(text)",
+        "ledger/parsing.py:24  parse_amount(parts[1])",
+        "tests/test_parsing.py:5  parse_amount(\"$1,200.50\")"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T26",
+      "category": "exceptions",
+      "target": "ledger.store.Repository.get",
+      "title": "A dict lookup with get is more direct",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.009,
+      "places": [
+        "ledger/app.py:44  repository.get(number)",
+        "ledger/report.py:34  totals.get(invoice.currency, 0.0)",
+        "tests/test_app.py:13  repository.get(\"A\")",
+        "tests/test_store.py:13  filled().get(\"A\")",
+        "tests/test_store.py:18  filled().get(\"Z\")"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T27",
+      "category": "exceptions",
+      "target": "ledger.pricing.apply_discount",
+      "title": "Clamp the percentage rather than fail",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.003,
+      "places": [
+        "ledger/app.py:31  apply_discount(item, percent=percent)",
+        "tests/test_pricing.py:18  apply_discount(Item(\"pen\", 10.0), 10)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T28",
+      "category": "exceptions",
+      "target": "ledger.models.Invoice.remove",
+      "title": "A generator expression replaces the helper",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.004,
+      "places": [
+        "tests/test_models.py:26  invoice.remove(\"pen\")"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T29",
+      "category": "exceptions",
+      "target": "ledger.parsing.parse_lines",
+      "title": "One bad line should not stop an import",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 3.088,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T30",
+      "category": "exceptions",
+      "target": "ledger.app.pay",
+      "title": "Catch the base class, in case more errors are added",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.96,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T31",
+      "category": "names",
+      "target": "ledger.pricing.round_money",
+      "title": "Decimal rounds money correctly",
+      "outcome": "caught",
+      "caught_by": "names",
+      "seconds": 0.006,
+      "places": [
+        "ledger/pricing.py:14  round_money(item.price * (100 - percent) / 100)",
+        "ledger/pricing.py:19  round_money(amount * rate)",
+        "ledger/pricing.py:24  round_money(subtotal + tax_for(subtotal, rate))",
+        "ledger/pricing.py:37  round_money(unit * quantity)",
+        "tests/test_pricing.py:14  round_money(2.5)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T32",
+      "category": "names",
+      "target": "ledger.models.Invoice.subtotal",
+      "title": "A loop over the invoice lines",
+      "outcome": "caught",
+      "caught_by": "names",
+      "seconds": 0.011,
+      "places": [
+        "ledger/models.py:36  self.subtotal()",
+        "ledger/models.py:60  super().subtotal()",
+        "ledger/pricing.py:23  invoice.subtotal()",
+        "ledger/report.py:34  invoice.subtotal()",
+        "ledger/store.py:37  item.subtotal()",
+        "tests/test_models.py:13  sample().subtotal()",
+        "tests/test_models.py:32  invoice.subtotal()"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T33",
+      "category": "names",
+      "target": "ledger.report.format_line",
+      "title": "The standard library already shortens text",
+      "outcome": "caught",
+      "caught_by": "names",
+      "seconds": 0.006,
+      "places": [
+        "ledger/report.py:26  format_line(item)"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T34",
+      "category": "names",
+      "target": "ledger.report.render",
+      "title": "A helper with a better name",
+      "outcome": "caught",
+      "caught_by": "names",
+      "seconds": 0.005,
+      "places": [
+        "tests/test_report.py:18  render(sample())"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T35",
+      "category": "names",
+      "target": "ledger.report.summarize",
+      "title": "Import the total under its own name",
+      "outcome": "caught",
+      "caught_by": "names",
+      "seconds": 0.005,
+      "places": [
+        "ledger/app.py:60  summarize(invoice)",
+        "tests/test_report.py:10  summarize(sample())"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T36",
+      "category": "names",
+      "target": "ledger.pricing.invoice_total",
+      "title": "Passing the rate by name, for clarity",
+      "outcome": "caught",
+      "caught_by": "names",
+      "seconds": 0.006,
+      "places": [
+        "ledger/report.py:10  total_of(invoice)",
+        "ledger/report.py:27  total_of(invoice)",
+        "tests/test_pricing.py:26  invoice_total(Invoice(\"A\").add(Item(\"pen\", 100.0)))"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T37",
+      "category": "behaviour",
+      "target": "ledger.pricing.round_money",
+      "title": "The small constant looks like a mistake",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.781,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T38",
+      "category": "behaviour",
+      "target": "ledger.pricing.split_evenly",
+      "title": "Each person simply pays an equal share",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 3.051,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T39",
+      "category": "behaviour",
+      "target": "ledger.pricing.price_band",
+      "title": "Inclusive limits read more naturally",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 3.025,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T40",
+      "category": "behaviour",
+      "target": "ledger.report.top_items",
+      "title": "Sort in place and save a copy",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.674,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T41",
+      "category": "behaviour",
+      "target": "ledger.parsing.parse_lines",
+      "title": "A simpler filter for empty lines",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 1.219,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T42",
+      "category": "behaviour",
+      "target": "ledger.text.truncate",
+      "title": "A simpler slice",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 3.081,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T43",
+      "category": "behaviour",
+      "target": "ledger.text.slugify",
+      "title": "A simpler pattern",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.64,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T44",
+      "category": "behaviour",
+      "target": "ledger.store.Repository.save",
+      "title": "Store a copy, to protect the repository from later changes",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.897,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T45",
+      "category": "behaviour",
+      "target": "ledger.store.Repository.numbers",
+      "title": "Dicts keep their order, so sorting is wasted",
+      "outcome": "caught",
+      "caught_by": "tests",
+      "seconds": 2.952,
+      "places": [
+        "tests/test_store.py  tests.test_store::test_numbers"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T46",
+      "category": "behaviour",
+      "target": "ledger.models.Item.with_quantity",
+      "title": "Avoid building a new object",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.003,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T47",
+      "category": "behaviour",
+      "target": "ledger.dates.quarter_of",
+      "title": "The minus one looked redundant",
+      "outcome": "unconfirmed",
+      "caught_by": null,
+      "seconds": 1.317,
+      "places": [],
+      "notes": [
+        "tests: no test reaches this function, so its behaviour cannot be checked"
+      ]
+    },
+    {
+      "id": "T48",
+      "category": "behaviour",
+      "target": "ledger.report.totals_by_currency",
+      "title": "A plain assignment is easier to read",
+      "outcome": "kept",
+      "caught_by": null,
+      "seconds": 2.927,
+      "places": [],
+      "notes": []
+    },
+    {
+      "id": "T49",
+      "category": "behaviour",
+      "target": "ledger.store.AuditedRepository.__init__",
+      "title": "A list default saves the None check",
+      "outcome": "caught",
+      "caught_by": "contract",
+      "seconds": 0.008,
+      "places": [
+        "ledger/app.py:104  AuditedRepository()",
+        "tests/test_store.py:36  AuditedRepository()"
+      ],
+      "notes": []
+    },
+    {
+      "id": "T50",
+      "category": "behaviour",
+      "target": "ledger.dates.days_between",
+      "title": "The arguments are always in order, so abs is wasted",
+      "outcome": "unconfirmed",
+      "caught_by": null,
+      "seconds": 1.545,
+      "places": [],
+      "notes": [
+        "tests: no test reaches this function, so its behaviour cannot be checked"
+      ]
+    }
+  ]
+}

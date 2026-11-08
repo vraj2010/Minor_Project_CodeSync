@@ -26,6 +26,7 @@ from .cliargs import (
     print_rows,
     print_table,
 )
+from .envfile import setting
 from .llm import KEY_ENV, MODEL_ENV, ProviderError
 from .resolve import Resolver
 from .text import plural
@@ -316,7 +317,7 @@ def _cmd_annotate(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     client = create_model_client(args)
-    key = os.environ.get(KEY_ENV, "")
+    key = setting(KEY_ENV, "") or ""
 
     rows = [
         ("model", client.model),

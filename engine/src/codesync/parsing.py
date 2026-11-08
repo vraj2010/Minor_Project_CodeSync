@@ -38,6 +38,13 @@ def read_exact_source(path: Path) -> str:
     return raw.decode(encoding)
 
 
+def encode_like(text: str, original: bytes) -> bytes:
+    """`text` as bytes in the encoding `original` was stored in, so an edited
+    file keeps its encoding and any byte order mark."""
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(original).readline)
+    return text.encode(encoding)
+
+
 def load_module(path: Path, relpath: str) -> tuple[ast.Module, str]:
     """Parse `path`, raising SourceError instead of letting one unreadable file
     abort the indexing of a whole repository."""
@@ -47,6 +54,10 @@ def load_module(path: Path, relpath: str) -> tuple[ast.Module, str]:
         raise SourceError(ParseFailure(relpath, "decode", str(exc))) from exc
     except OSError as exc:
         raise SourceError(ParseFailure(relpath, "read", str(exc))) from exc
+
+    # Checked here because what ast.parse raises for this differs by version.
+    if "\x00" in source:
+        raise SourceError(ParseFailure(relpath, "decode", "the file holds a null byte"))
 
     try:
         tree = ast.parse(source, filename=relpath)

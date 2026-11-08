@@ -7,6 +7,7 @@ from textwrap import dedent
 
 import pytest
 
+from codesync import envfile
 from codesync.index import build_index
 from codesync.llm import Completion
 from codesync.resolve import Resolver
@@ -105,6 +106,13 @@ class AnnotatingClient:
 
     def close(self):
         pass
+
+
+@pytest.fixture(autouse=True)
+def hide_the_real_key_file(monkeypatch):
+    """A developer's own `.env` must never reach a test: tests would stop being
+    repeatable, and one that reached the network would spend real quota."""
+    monkeypatch.setattr(envfile, "ENV_FILE", Path("no-such-folder") / ".env")
 
 
 @pytest.fixture
