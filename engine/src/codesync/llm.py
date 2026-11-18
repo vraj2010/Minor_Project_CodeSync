@@ -1,4 +1,8 @@
-"""Talking to Google's Gemini over its OpenAI-compatible API."""
+"""Talking to a chat model over the OpenAI-compatible API.
+
+Gemini, DeepSeek and Ollama all serve that API, so one client covers them and a
+provider is only an address, a default model and the setting its key is in.
+Gemini is the default."""
 
 import time
 from dataclasses import dataclass
@@ -9,11 +13,76 @@ import httpx
 from . import envfile
 from .envfile import setting
 
+PROVIDER_ENV = "CODESYNC_PROVIDER"
+_LOCAL_TIMEOUT = 600.0
+
+
+@dataclass(frozen=True)
+class Provider:
+    name: str
+    label: str
+    base_url: str
+    model: str
+    key_env: str | None
+    """The setting the key is read from; None for a server that needs none."""
+    local: bool = False
+    """A model on this computer, which is slow enough to need a longer wait."""
+
+    @property
+    def prefix(self) -> str:
+        return self.name.upper()
+
+    @property
+    def model_env(self) -> str:
+        return f"{self.prefix}_MODEL"
+
+    @property
+    def base_url_env(self) -> str:
+        return f"{self.prefix}_BASE_URL"
+
+    def key(self) -> str | None:
+        return setting(self.key_env) if self.key_env else None
+
+    def configured(self) -> bool:
+        """Whether a client could be made without a missing key."""
+        return self.key_env is None or bool(self.key())
+
+
+PROVIDERS = {
+    provider.name: provider
+    for provider in (
+        Provider(
+            "gemini",
+            "Gemini",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "gemini-3.8-flash",
+            "GEMINI_API_KEY",
+        ),
+        Provider(
+            "deepseek",
+            "DeepSeek",
+            "https://api.deepseek.com/v1",
+            "deepseek-chat",
+            "DEEPSEEK_API_KEY",
+        ),
+        Provider(
+            "ollama",
+            "Ollama",
+            "http://localhost:11434/v1",
+            "deepseek-coder:6.7b",
+            None,
+            local=True,
+        ),
+    )
+}
+DEFAULT_PROVIDER = "gemini"
+
+# Gemini's settings, kept under their old names for the code that uses them.
 KEY_ENV = "GEMINI_API_KEY"
 MODEL_ENV = "GEMINI_MODEL"
 BASE_URL_ENV = "GEMINI_BASE_URL"
-DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_BASE_URL = PROVIDERS["gemini"].base_url
+DEFAULT_MODEL = PROVIDERS["gemini"].model
 
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _MAX_WAIT = 30.0
@@ -52,9 +121,11 @@ class ChatClient:
         retries: int = 4,
         retry_delay: float = 2.0,
         http: httpx.Client | None = None,
+        provider: Provider | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.provider = provider
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.retries = retries
@@ -74,8 +145,8 @@ class ChatClient:
         return _completion(data, self.model, time.perf_counter() - started)
 
     def list_models(self) -> list[str]:
-        """The model names Gemini currently offers, which change often enough
-        that a hard-coded default can go stale."""
+        """The model names the provider currently offers, which change often
+        enough that a hard-coded default can go stale."""
         url = f"{self.base_url}/models"
         try:
             response = self._http.get(url, headers=self._headers())
@@ -127,34 +198,51 @@ class ChatClient:
         return min(delay, _MAX_WAIT)
 
 
+def resolve_provider(name: str | None = None) -> Provider:
+    """The provider named, then the one in CODESYNC_PROVIDER, then Gemini."""
+    chosen = (name or setting(PROVIDER_ENV) or DEFAULT_PROVIDER).strip().lower()
+    provider = PROVIDERS.get(chosen)
+    if provider is None:
+        raise ProviderError(
+            f"no provider is called {chosen!r}; choose one of "
+            + ", ".join(PROVIDERS)
+        )
+    return provider
+
+
 def create_client(
     *,
+    provider: str | None = None,
     model: str | None = None,
     temperature: float = 0.2,
     max_tokens: int = 2048,
     timeout: float = 120.0,
     retries: int = 4,
 ) -> ChatClient:
-    """A Gemini client, using the key in GEMINI_API_KEY, from the environment or
-    from the engine's `.env` file.
+    """A client for one provider, with its key from the environment or from the
+    engine's `.env` file. Settings are named after the provider: for Gemini,
+    GEMINI_API_KEY, GEMINI_MODEL and GEMINI_BASE_URL.
 
-    The model comes from the argument, then GEMINI_MODEL, then the default.
-    GEMINI_BASE_URL sends the requests to another address, such as a gateway."""
-    api_key = setting(KEY_ENV)
-    if not api_key:
+    The model comes from the argument, then <PROVIDER>_MODEL, then the
+    provider's default. <PROVIDER>_BASE_URL sends the requests elsewhere, such
+    as a gateway. A model on this computer is given longer to answer."""
+    chosen = resolve_provider(provider)
+    api_key = chosen.key()
+    if chosen.key_env and not api_key:
         raise ProviderError(
-            f"set the {KEY_ENV} environment variable to your API key, "
+            f"set the {chosen.key_env} environment variable to your API key, "
             f"or put it in {envfile.ENV_FILE}"
         )
 
     return ChatClient(
-        setting(BASE_URL_ENV) or DEFAULT_BASE_URL,
-        model or setting(MODEL_ENV) or DEFAULT_MODEL,
+        setting(chosen.base_url_env) or chosen.base_url,
+        model or setting(chosen.model_env) or chosen.model,
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
-        timeout=timeout,
+        timeout=max(timeout, _LOCAL_TIMEOUT) if chosen.local else timeout,
         retries=retries,
+        provider=chosen,
     )
 
 
@@ -196,7 +284,7 @@ def _model_name(item: dict) -> str:
 
 
 def _error_message(response: httpx.Response) -> str:
-    """Gemini's own explanation, which it sometimes wraps in a list."""
+    """The provider's own explanation, which Gemini sometimes wraps in a list."""
     try:
         data = response.json()
     except ValueError:

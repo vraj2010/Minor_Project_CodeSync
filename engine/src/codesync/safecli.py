@@ -489,7 +489,8 @@ def _comparison_progress(run: dict) -> None:
 
 
 def _print_comparison(comparison: Comparison) -> None:
-    print(f"\nmodel {comparison.model}\n")
+    via = f" ({comparison.provider})" if comparison.provider else ""
+    print(f"\nmodel {comparison.model}{via}\n")
     print_table(
         ("arm", "tasks", "kept", "kept and broken", "refused", "requests", "broken rate"),
         [

@@ -575,6 +575,21 @@ button:disabled {
   font-size: 13.5px;
 }
 
+.success {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--green-tint);
+  color: var(--green-dark);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.change-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .empty {
   display: grid;
   place-content: center;

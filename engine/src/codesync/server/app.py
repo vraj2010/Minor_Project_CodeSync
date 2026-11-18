@@ -28,9 +28,8 @@ from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..context import DEFAULT_GOAL
-from ..envfile import setting
 from ..impact import analyze_impact, dependency_map, is_test
-from ..llm import KEY_ENV, ModelClient, ProviderError, create_client
+from ..llm import ModelClient, ProviderError, create_client, resolve_provider
 from ..response import ResponseError
 from ..safe import DEFAULT_FIXES
 from ..splice import SpliceError
@@ -39,7 +38,16 @@ from ..targets import TargetError, find_refinable, find_symbol
 from ..variables import VariableKind
 from .auth import authenticate, request_key
 from .jobs import BudgetExceeded, JobConflict, JobManager
-from .refinement import check_rewrite, describe_symbol, options_for
+from .refinement import (
+    ChangeRefused,
+    applied_changes,
+    apply_change,
+    check_rewrite,
+    describe_symbol,
+    options_for,
+    patch_file,
+    undo_change,
+)
 from .settings import Settings
 from .store import LimitReached, NotFound, ProjectState, ProjectStore
 from .uploads import Limits, UploadError, extract_python_files, fetch_github_archive
@@ -80,6 +88,25 @@ class ImproveRequest(BaseModel):
     fixes: int = Field(
         default=DEFAULT_FIXES, ge=0, le=DEFAULT_FIXES, description="retries allowed"
     )
+
+
+class ApplyRequest(BaseModel):
+    change: str = Field(
+        description="id of a checked rewrite, from a verify or improve result"
+    )
+
+
+class UndoRequest(BaseModel):
+    change: str | None = Field(
+        default=None, description="id of an applied change; the newest if left out"
+    )
+
+
+def _model_configured() -> bool:
+    try:
+        return resolve_provider().configured()
+    except ProviderError:
+        return False
 
 
 def default_client_factory() -> ModelClient:
@@ -158,7 +185,7 @@ def create_app(
         """What this server can do, so a client can say so up front."""
         return {
             "runs_tests": settings.run_tests,
-            "model_configured": bool(setting(KEY_ENV)),
+            "model_configured": _model_configured(),
         }
 
     @app.post("/v1/projects/upload", status_code=201, tags=["projects"])
@@ -334,11 +361,14 @@ def create_app(
     def verify(project_id: str, body: VerifyRequest, who: str = Depends(owner)) -> dict:
         """Check a rewrite written by hand. No model is involved."""
         project = project_of(project_id, who)
-        target = _refinable(project, body.target)
+        view = project.snapshot()
+        target = _refinable_in(view.index, body.target)
         if not checks.acquire(timeout=settings.check_timeout):
             raise HTTPException(429, "too many checks are running; try again shortly")
         try:
-            return check_rewrite(project, target, body.code, options_for(settings))
+            return check_rewrite(
+                project, view, target, body.code, options_for(settings)
+            )
         except (ResponseError, SpliceError, ValueError) as error:
             raise HTTPException(422, f"the rewrite cannot be used: {error}") from None
         finally:
@@ -368,10 +398,70 @@ def create_app(
         return job.to_dict()
 
     def _refinable(project: ProjectState, qualname: str):
+        return _refinable_in(project.index, qualname)
+
+    def _refinable_in(index, qualname: str):
         try:
-            return find_refinable(project.index, qualname)
+            return find_refinable(index, qualname)
         except TargetError as error:
             raise HTTPException(404, str(error)) from None
+
+    def _checked(project: ProjectState, change_id: str | None):
+        try:
+            return project.checked_change(change_id)
+        except NotFound as error:
+            raise HTTPException(404, str(error.args[0])) from None
+
+    @app.post("/v1/projects/{project_id}/apply", tags=["refinement"])
+    def apply(project_id: str, body: ApplyRequest, who: str = Depends(owner)) -> dict:
+        """Write a checked rewrite into the project's files. Only a rewrite every
+        check passed is written, and only if nothing changed since it was
+        checked. This changes the server's copy of the project; download the
+        patch to change your own."""
+        project = project_of(project_id, who)
+        change = _checked(project, body.change)
+        if jobs.busy(project.id):
+            raise HTTPException(409, "a job is reading this project; wait for it")
+        try:
+            return apply_change(project, change)
+        except ChangeRefused as error:
+            raise HTTPException(409, str(error)) from None
+
+    @app.post("/v1/projects/{project_id}/undo", tags=["refinement"])
+    def undo(
+        project_id: str, body: UndoRequest | None = None, who: str = Depends(owner)
+    ) -> dict:
+        """Put a file back byte for byte as it was before a change was applied.
+        Without an id, the newest change is undone."""
+        project = project_of(project_id, who)
+        if jobs.busy(project.id):
+            raise HTTPException(409, "a job is reading this project; wait for it")
+        try:
+            return undo_change(project, body.change if body else None)
+        except ChangeRefused as error:
+            raise HTTPException(409, str(error)) from None
+
+    @app.get("/v1/projects/{project_id}/applied", tags=["refinement"])
+    def list_applied_changes(project_id: str, who: str = Depends(owner)) -> list[dict]:
+        """Changes applied to the project that can still be undone, oldest first."""
+        return applied_changes(project_of(project_id, who))
+
+    @app.get("/v1/projects/{project_id}/patch", tags=["refinement"])
+    def download_patch(
+        project_id: str,
+        change: str | None = Query(
+            None, description="id of a checked rewrite; the newest if left out"
+        ),
+        who: str = Depends(owner),
+    ) -> Response:
+        """A checked rewrite as a unified diff, to apply with `git apply` from the
+        project's root folder."""
+        name, diff = patch_file(_checked(project_of(project_id, who), change))
+        return Response(
+            diff,
+            media_type="text/x-diff",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
 
     @app.post("/v1/projects/{project_id}/annotate", status_code=202, tags=["jobs"])
     def annotate(

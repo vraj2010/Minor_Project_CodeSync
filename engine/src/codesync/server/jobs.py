@@ -21,7 +21,7 @@ from ..safe import Decision, refine_safely
 from ..symbols import Symbol
 from ..varmap import parse_kinds
 from ..verify import VerifyOptions
-from .refinement import improvement_payload
+from .refinement import improvement_payload, remember_improvement
 from .settings import Settings
 from .store import NotFound, ProjectState
 
@@ -209,6 +209,14 @@ class JobManager:
         job.cancel.set()
         return job
 
+    def busy(self, project_id: str) -> bool:
+        """Whether a job is reading this project right now."""
+        with self._lock:
+            return any(
+                item.project_id == project_id and item.status.active
+                for item in self._jobs.values()
+            )
+
     def cancel_project(self, project_id: str) -> None:
         with self._lock:
             active = [
@@ -259,13 +267,14 @@ class JobManager:
         client: ModelClient,
     ) -> None:
         job.status = JobStatus.RUNNING
+        view = project.snapshot()
         try:
             result = refine_safely(
-                project.index,
+                view.index,
                 target,
                 client,
                 goal=goal,
-                resolver=project.resolver,
+                resolver=view.resolver,
                 options=options,
                 fixes=fixes,
             )
@@ -275,7 +284,8 @@ class JobManager:
             self._refund(job.owner, job.total_requests)
         else:
             job.done_requests = len(result.attempts)
-            job.result = improvement_payload(result, project.resolver)
+            change = remember_improvement(project, result, view.revision)
+            job.result = improvement_payload(result, view.resolver, change)
             self._refund(job.owner, job.total_requests - job.done_requests)
             if result.decision is Decision.FAILED:
                 job.status = JobStatus.FAILED

@@ -16,7 +16,7 @@ from .discovery import DEFAULT_EXCLUDES
 from .parsing import encode_like
 
 _SECRET_NAME = re.compile(
-    r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|GEMINI|CODESYNC)", re.IGNORECASE
+    r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|GEMINI|DEEPSEEK|CODESYNC)", re.IGNORECASE
 )
 _VENV_FOLDERS = (".venv", "venv", "env")
 

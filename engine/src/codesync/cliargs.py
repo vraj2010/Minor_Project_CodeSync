@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .index import ProjectIndex, build_index
-from .llm import DEFAULT_MODEL, MODEL_ENV, ChatClient, create_client
+from .llm import DEFAULT_PROVIDER, PROVIDER_ENV, PROVIDERS, ChatClient, create_client
 
 
 def add_project_arguments(parser: argparse.ArgumentParser) -> None:
@@ -21,8 +21,15 @@ def add_model_arguments(
     parser: argparse.ArgumentParser, *, max_tokens: int = 2048, retries: int = 4
 ) -> None:
     parser.add_argument(
+        "--provider",
+        choices=sorted(PROVIDERS),
+        help=f"who runs the model (default: ${PROVIDER_ENV}, then {DEFAULT_PROVIDER}); "
+        "ollama runs one on this computer",
+    )
+    parser.add_argument(
         "--model",
-        help=f"Gemini model name (default: ${MODEL_ENV}, then {DEFAULT_MODEL})",
+        help="model name (default: $<PROVIDER>_MODEL, such as $GEMINI_MODEL, "
+        "then the provider's own default)",
     )
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--max-tokens", type=int, default=max_tokens)
@@ -33,18 +40,25 @@ def add_model_arguments(
         "--retries",
         type=int,
         default=retries,
-        help="times to retry when Gemini is busy or slow, waiting longer each time",
+        help="times to retry when the model is busy or slow, waiting longer each time",
     )
 
 
 def create_model_client(args: argparse.Namespace) -> ChatClient:
     return create_client(
+        provider=args.provider,
         model=args.model,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         timeout=args.timeout,
         retries=args.retries,
     )
+
+
+KEY_SOURCES = {
+    "gemini": "a Gemini key (from aistudio.google.com/apikey)",
+    "deepseek": "a DeepSeek key (from platform.deepseek.com)",
+}
 
 
 def load_index(args: argparse.Namespace) -> ProjectIndex:
@@ -70,18 +84,30 @@ def print_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> None:
         print("  ".join([*cells, line[-1]]))
 
 
-def explain_error(message: str) -> str | None:
+def explain_error(message: str, provider: str = DEFAULT_PROVIDER) -> str | None:
     """What to try, for the failures people actually run into."""
     text = message.lower()
+    chosen = PROVIDERS.get(provider, PROVIDERS[DEFAULT_PROVIDER])
+    if chosen.local and ("could not reach" in text or "no answer from" in text):
+        return (
+            "nothing answered at the Ollama address: start Ollama (`ollama serve`, "
+            f"or open the app) and download the model (`ollama pull {chosen.model}`)"
+        )
     if "returned 404" in text and "model" in text:
+        if chosen.local:
+            return (
+                "Ollama does not have that model: `ollama pull <name>` downloads "
+                "it, and `codesync models --provider ollama` lists what is there"
+            )
         return (
             "that model is not available, perhaps retired: `codesync models` "
-            "lists the current ones; then use --model, or set GEMINI_MODEL"
+            f"lists the current ones; then use --model, or set {chosen.model_env}"
         )
     if "returned 401" in text or "api key" in text:
+        source = KEY_SOURCES.get(chosen.name, f"a {chosen.label} key")
         return (
             "the key was rejected: check it was copied whole, has no spaces, "
-            "and is a Gemini key (from aistudio.google.com/apikey)"
+            f"and is {source}"
         )
     if "finish reason 'length'" in text:
         return (
@@ -90,12 +116,12 @@ def explain_error(message: str) -> str | None:
         )
     if "returned 503" in text or "high demand" in text or "overloaded" in text:
         return (
-            "Gemini is overloaded, which is usually brief: wait a minute "
+            f"{chosen.label} is overloaded, which is usually brief: wait a minute "
             "and run it again, or try another model (`codesync models`)"
         )
     if "returned 403" in text:
         return (
-            "access was denied: check the key is allowed to use the Gemini API "
+            f"access was denied: check the key is allowed to use the {chosen.label} API "
             "and that the model is available to your account"
         )
     if "returned 429" in text:

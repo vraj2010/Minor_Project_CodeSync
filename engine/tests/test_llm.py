@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import httpx
 import pytest
@@ -7,6 +6,7 @@ import pytest
 from codesync.llm import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
+    PROVIDERS,
     ChatClient,
     ProviderError,
     create_client,
@@ -388,9 +388,94 @@ def test_the_key_is_sent_as_a_bearer_token(monkeypatch):
     assert seen["auth"] == "Bearer AIza-secret"
 
 
-def test_nothing_in_the_client_refers_to_another_provider():
-    import codesync.llm as llm
+def test_gemini_stays_the_default_provider(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "other")
 
-    source = Path(llm.__file__).read_text(encoding="utf-8").lower()
+    client = create_client()
 
-    assert "deepseek" not in source
+    assert client.provider.name == "gemini"
+    assert client.base_url == DEFAULT_BASE_URL
+
+
+def test_deepseek_uses_its_own_key_address_and_model(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers["authorization"]
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json=reply())
+
+    client = create_client(provider="deepseek")
+    client._http = httpx.Client(transport=httpx.MockTransport(handler))
+    client.complete(MESSAGES)
+
+    assert seen["auth"] == "Bearer sk-deep"
+    assert seen["url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert client.model == "deepseek-chat"
+
+
+def test_deepseek_without_its_key_names_the_variable(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    with pytest.raises(ProviderError, match="set the DEEPSEEK_API_KEY environment"):
+        create_client(provider="deepseek")
+
+
+def test_ollama_needs_no_key_and_sends_none(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization")
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json=reply())
+
+    client = create_client(provider="ollama")
+    client._http = httpx.Client(transport=httpx.MockTransport(handler))
+    client.complete(MESSAGES)
+
+    assert seen["auth"] is None
+    assert seen["url"] == "http://localhost:11434/v1/chat/completions"
+    assert client.model == "deepseek-coder:6.7b"
+
+
+def test_a_local_model_is_given_longer_to_answer(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key")
+
+    local = create_client(provider="ollama", timeout=120)
+    hosted = create_client(provider="gemini", timeout=120)
+
+    assert local._http.timeout.read == 600
+    assert hosted._http.timeout.read == 120
+
+
+def test_the_provider_can_be_chosen_by_environment(monkeypatch):
+    monkeypatch.setenv("CODESYNC_PROVIDER", "Ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "deepseek-coder:33b")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://gpu-box:11434/v1")
+
+    client = create_client()
+
+    assert client.provider.name == "ollama"
+    assert client.model == "deepseek-coder:33b"
+    assert client.base_url == "http://gpu-box:11434/v1"
+
+
+def test_an_unknown_provider_lists_the_choices():
+    with pytest.raises(ProviderError, match="gemini, deepseek, ollama"):
+        create_client(provider="openai")
+
+
+def test_a_provider_without_a_key_setting_counts_as_configured(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    assert PROVIDERS["ollama"].configured()
+    assert not PROVIDERS["gemini"].configured()

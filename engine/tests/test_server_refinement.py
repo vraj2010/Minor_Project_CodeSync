@@ -1,4 +1,6 @@
 import io
+import shutil
+import subprocess
 import time
 import zipfile
 
@@ -386,3 +388,169 @@ def test_a_missing_model_key_is_explained(tmp_path):
         )
 
     assert response.status_code == 503
+
+
+def on_disk(tmp_path, project_id, relpath="shop/prices.py"):
+    return tmp_path / "data" / "projects" / project_id / "src" / relpath
+
+
+def checked(client, project_id, code):
+    data = client.post(
+        f"/v1/projects/{project_id}/verify",
+        json={"target": "shop.prices.gross", "code": code},
+    ).json()
+    return data["change"], data["report"]["verdict"]
+
+
+@pytest.mark.slow
+def test_a_safe_rewrite_is_applied_and_undone_byte_for_byte(make_client, tmp_path):
+    original = PROJECT["shop/prices.py"].encode()
+    with make_client(CODESYNC_RUN_TESTS=1, CODESYNC_ALLOW_ANONYMOUS=1) as client:
+        project_id = upload(client)
+        change, verdict = checked(client, project_id, SOUND)
+        assert verdict == "safe"
+
+        applied = client.post(
+            f"/v1/projects/{project_id}/apply", json={"change": change}
+        )
+        assert applied.status_code == 200
+        assert applied.json()["message"] == "Changes saved to shop/prices.py"
+        assert b"amount + amount * rate" in on_disk(tmp_path, project_id).read_bytes()
+        assert [item["target"] for item in applied.json()["history"]] == [
+            "shop.prices.gross"
+        ]
+        symbol = client.get(f"/v1/projects/{project_id}/symbols/shop.prices.gross")
+        assert "amount + amount * rate" in symbol.json()["source"]
+
+        undone = client.post(f"/v1/projects/{project_id}/undo")
+        assert undone.status_code == 200
+        assert undone.json()["history"] == []
+        assert on_disk(tmp_path, project_id).read_bytes() == original
+        assert client.get(f"/v1/projects/{project_id}/applied").json() == []
+
+
+@pytest.mark.slow
+def test_a_change_checked_before_the_project_changed_is_not_applied(make_client):
+    with make_client(CODESYNC_RUN_TESTS=1, CODESYNC_ALLOW_ANONYMOUS=1) as client:
+        project_id = upload(client)
+        first, _ = checked(client, project_id, SOUND)
+        second, _ = checked(client, project_id, SOUND)
+        client.post(f"/v1/projects/{project_id}/apply", json={"change": first})
+
+        response = client.post(
+            f"/v1/projects/{project_id}/apply", json={"change": second}
+        )
+
+    assert response.status_code == 409
+    assert "changed since" in response.json()["detail"]
+
+
+@pytest.mark.slow
+def test_a_kept_improvement_can_be_applied(make_client, tmp_path):
+    with make_client(
+        f"```python\n{SOUND}```", CODESYNC_RUN_TESTS=1, CODESYNC_ALLOW_ANONYMOUS=1
+    ) as client:
+        project_id = upload(client)
+        job = client.post(
+            f"/v1/projects/{project_id}/improve", json={"target": "shop.prices.gross"}
+        ).json()
+        result = wait_for(client, job["id"])["result"]
+        response = client.post(
+            f"/v1/projects/{project_id}/apply", json={"change": result["change"]}
+        )
+
+    assert result["decision"] == "kept"
+    assert response.status_code == 200
+    assert b"amount + amount * rate" in on_disk(tmp_path, project_id).read_bytes()
+
+
+@pytest.mark.slow
+def test_an_unconfirmed_rewrite_is_not_applied(client, project_id, tmp_path):
+    change, verdict = checked(client, project_id, SOUND)
+
+    response = client.post(f"/v1/projects/{project_id}/apply", json={"change": change})
+
+    assert verdict == "unconfirmed"
+    assert response.status_code == 409
+    assert "unconfirmed" in response.json()["detail"]
+    assert on_disk(tmp_path, project_id).read_bytes() == PROJECT["shop/prices.py"].encode()
+
+
+def test_an_unsafe_rewrite_is_not_applied(client, project_id, tmp_path):
+    change, verdict = checked(client, project_id, BREAKING)
+
+    response = client.post(f"/v1/projects/{project_id}/apply", json={"change": change})
+
+    assert verdict == "unsafe"
+    assert response.status_code == 409
+    assert "unsafe" in response.json()["detail"]
+    assert on_disk(tmp_path, project_id).read_bytes() == PROJECT["shop/prices.py"].encode()
+    assert client.get(f"/v1/projects/{project_id}/applied").json() == []
+
+
+def test_an_unknown_change_is_not_found(client, project_id):
+    response = client.post(f"/v1/projects/{project_id}/apply", json={"change": "nope"})
+
+    assert response.status_code == 404
+
+
+def test_undo_with_nothing_applied_is_refused(client, project_id):
+    response = client.post(f"/v1/projects/{project_id}/undo")
+
+    assert response.status_code == 409
+    assert "no applied change" in response.json()["detail"]
+
+
+def test_another_key_cannot_apply_a_change(client, project_id):
+    change, _ = checked(client, project_id, BREAKING)
+
+    response = client.post(
+        f"/v1/projects/{project_id}/apply",
+        json={"change": change},
+        headers={"X-API-Key": OTHER_KEY},
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_checked_rewrite_downloads_as_a_patch(client, project_id):
+    change, _ = checked(client, project_id, BREAKING)
+
+    by_id = client.get(f"/v1/projects/{project_id}/patch", params={"change": change})
+    newest = client.get(f"/v1/projects/{project_id}/patch")
+
+    assert by_id.status_code == 200
+    assert by_id.text.startswith("--- a/shop/prices.py\n+++ b/shop/prices.py\n")
+    assert "+def gross(amount: float, *, tax: float = 0.2) -> float:" in by_id.text
+    assert by_id.headers["content-type"].startswith("text/x-diff")
+    assert 'filename="shop.prices.gross.patch"' in by_id.headers["content-disposition"]
+    assert newest.text == by_id.text
+
+
+def test_a_patch_needs_a_checked_rewrite(client, project_id):
+    assert client.get(f"/v1/projects/{project_id}/patch").status_code == 404
+    assert (
+        client.get(
+            f"/v1/projects/{project_id}/patch", params={"change": "nope"}
+        ).status_code
+        == 404
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_the_patch_applies_with_git(client, project_id, tmp_path):
+    change, _ = checked(client, project_id, BREAKING)
+    patch = client.get(
+        f"/v1/projects/{project_id}/patch", params={"change": change}
+    ).content
+    copy = tmp_path / "copy"
+    for name, content in PROJECT.items():
+        (copy / name).parent.mkdir(parents=True, exist_ok=True)
+        (copy / name).write_bytes(content.encode())
+    (tmp_path / "change.patch").write_bytes(patch)
+
+    subprocess.run(
+        ["git", "apply", str(tmp_path / "change.patch")], cwd=copy, check=True
+    )
+
+    assert "tax: float" in (copy / "shop/prices.py").read_text()
