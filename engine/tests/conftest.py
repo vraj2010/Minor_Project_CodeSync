@@ -114,6 +114,8 @@ def hide_the_real_key_file(monkeypatch):
     repeatable, and one that reached the network would spend real quota."""
     monkeypatch.setattr(envfile, "ENV_FILE", Path("no-such-folder") / ".env")
     monkeypatch.delenv("CODESYNC_PROVIDER", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("CODESYNC_FALLBACK", raising=False)
 
 
 @pytest.fixture

@@ -308,8 +308,8 @@ export function Workspace({ connection, capabilities, projectId, qualname }: Pro
         </div>
         {!capabilities.model_configured && (
           <p className="muted">
-            Asking the AI needs a model on the engine: a GEMINI_API_KEY, a DEEPSEEK_API_KEY, or
-            CODESYNC_PROVIDER=ollama. Checking your own version does not.
+            Asking the AI needs a configured model on the engine: Gemini, Groq, DeepSeek,
+            or local Ollama. Checking your own version does not.
           </p>
         )}
 

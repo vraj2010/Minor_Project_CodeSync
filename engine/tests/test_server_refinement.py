@@ -103,6 +103,12 @@ def test_a_server_says_what_it_can_do(client, monkeypatch):
     }
 
 
+def test_a_server_recognizes_an_explicit_groq_provider(client, monkeypatch):
+    monkeypatch.setenv("CODESYNC_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    assert client.get("/v1/capabilities").json()["model_configured"] is True
+
+
 def test_running_tests_is_refused_on_a_shared_server():
     with pytest.raises(ValueError, match="only allowed for local use"):
         Settings.from_env({"CODESYNC_RUN_TESTS": "1", "CODESYNC_API_KEYS": "k"})
