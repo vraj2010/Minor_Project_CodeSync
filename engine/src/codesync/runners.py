@@ -157,6 +157,13 @@ def run_pytest(
             if run.total or finished.returncode == 5:
                 return run
         tail = output.read_text(encoding="utf-8", errors="replace").strip()[-_TAIL:]
+        missing = re.search(r"(?:^|\n)(?:E\s+)?ModuleNotFoundError: No module named '([\w.]+)'\s*$", tail)
+        if missing:
+            return TestRun(problem=(
+                f"pytest could not import '{missing[1]}'. Check that the uploaded "
+                "project includes that module and its test dependencies are installed "
+                "in the engine's Python environment, then run the check again."
+            ))
         return TestRun(problem=f"pytest could not run: {tail}")
 
 

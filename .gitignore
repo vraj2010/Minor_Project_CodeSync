@@ -13,3 +13,7 @@ node_modules/
 .env
 .DS_Store
 .codesync/
+
+# Local editor settings and demo archives at the project root
+/.vscode/
+/*-demo.zip

@@ -1,0 +1,12 @@
+# Dependencies for the trusted Requests sample verified by demo_verify.py.
+# Run from the repository root:
+# .\engine\.venv\Scripts\python.exe -m pip install -r engine/scripts/requirements-requests-demo.txt
+charset-normalizer>=2,<4
+idna>=2.5,<4
+urllib3>=1.26,<3
+certifi>=2023.5.7
+PySocks
+pytest>=8,<10
+pytest-httpbin==2.1.0
+httpbin~=0.10.0
+trustme
