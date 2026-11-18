@@ -5,7 +5,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .index import ProjectIndex, build_index
-from .llm import DEFAULT_PROVIDER, PROVIDER_ENV, PROVIDERS, ChatClient, create_client
+from .llm import (
+    DEFAULT_PROVIDER, PROVIDER_ENV, PROVIDERS, ChatClient, FallbackClient, create_client,
+)
 
 
 def add_project_arguments(parser: argparse.ArgumentParser) -> None:
@@ -34,6 +36,10 @@ def add_model_arguments(
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--max-tokens", type=int, default=max_tokens)
     parser.add_argument(
+        "--no-fallback", dest="fallback", action="store_false", default=None,
+        help="use only the selected provider (also useful for fair comparisons)",
+    )
+    parser.add_argument(
         "--timeout", type=float, default=120.0, help="seconds to wait for a reply"
     )
     parser.add_argument(
@@ -44,7 +50,7 @@ def add_model_arguments(
     )
 
 
-def create_model_client(args: argparse.Namespace) -> ChatClient:
+def create_model_client(args: argparse.Namespace) -> ChatClient | FallbackClient:
     return create_client(
         provider=args.provider,
         model=args.model,
@@ -52,12 +58,14 @@ def create_model_client(args: argparse.Namespace) -> ChatClient:
         max_tokens=args.max_tokens,
         timeout=args.timeout,
         retries=args.retries,
+        fallback=args.fallback,
     )
 
 
 KEY_SOURCES = {
     "gemini": "a Gemini key (from aistudio.google.com/apikey)",
     "deepseek": "a DeepSeek key (from platform.deepseek.com)",
+    "groq": "a Groq key (from console.groq.com/keys)",
 }
 
 

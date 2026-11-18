@@ -344,9 +344,14 @@ def _cmd_check(args: argparse.Namespace) -> int:
         client.close()
 
     reply = " ".join(completion.text.split())[:40]
+    if getattr(client, "fallback", None) is not None:
+        rows.append(("served", completion.model))
     rows.append(("reply", f'"{reply}" in {completion.latency:.1f}s'))
     print_rows(rows)
-    print("\nthe key works" if key_env else "\nthe model answers")
+    if getattr(client, "fallback", None) is not None:
+        print("\nthe model route works (served by the model shown above)")
+    else:
+        print("\nthe key works" if key_env else "\nthe model answers")
     return 0
 
 

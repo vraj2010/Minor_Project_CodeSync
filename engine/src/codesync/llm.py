@@ -1,11 +1,14 @@
 """Talking to a chat model over the OpenAI-compatible API.
 
-Gemini, DeepSeek and Ollama all serve that API, so one client covers them and a
+Gemini, Groq, DeepSeek and Ollama all serve that API, so one client covers them and a
 provider is only an address, a default model and the setting its key is in.
 Gemini is the default."""
 
+import logging
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Protocol
 
 import httpx
@@ -15,6 +18,7 @@ from .envfile import setting
 
 PROVIDER_ENV = "CODESYNC_PROVIDER"
 _LOCAL_TIMEOUT = 600.0
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -73,6 +77,13 @@ PROVIDERS = {
             None,
             local=True,
         ),
+        Provider(
+            "groq",
+            "Groq",
+            "https://api.groq.com/openai/v1",
+            "openai/gpt-oss-120b",
+            "GROQ_API_KEY",
+        ),
     )
 }
 DEFAULT_PROVIDER = "gemini"
@@ -99,7 +110,18 @@ class Completion:
 
 
 class ProviderError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
+        self.retry_after = retry_after
 
 
 class ModelClient(Protocol):
@@ -177,10 +199,16 @@ class ChatClient:
             except httpx.TimeoutException as error:
                 if attempt >= self.retries:
                     raise ProviderError(
-                        f"no answer from {url} after {attempt + 1} attempts"
+                        f"no answer from {url} after {attempt + 1} attempts",
+                        retryable=True,
                     ) from error
             except httpx.HTTPError as error:
-                raise ProviderError(f"could not reach {url}: {error}") from error
+                raise ProviderError(
+                    f"could not reach {url}: {error}",
+                    retryable=isinstance(
+                        error, (httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError)
+                    ),
+                ) from error
             else:
                 if (
                     response.status_code not in _RETRY_STATUSES
@@ -196,6 +224,96 @@ class ChatClient:
         hinted = _retry_after(response)
         delay = hinted if hinted is not None else self.retry_delay * 2 ** (attempt - 1)
         return min(delay, _MAX_WAIT)
+
+
+class _Cooldown:
+    """Share a primary provider's failure across workers and web jobs."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._until = 0.0
+        self._error: ProviderError | None = None
+
+    def failure(self) -> ProviderError | None:
+        with self._lock:
+            if time.monotonic() < self._until:
+                return self._error
+            return None
+
+    def failed(self, error: ProviderError) -> None:
+        with self._lock:
+            self._until = max(
+                self._until, time.monotonic() + max(60.0, error.retry_after or 0.0)
+            )
+            # Keep the reason, without retaining an exception traceback and its clients.
+            self._error = ProviderError(
+                str(error), retryable=error.retryable,
+                status_code=error.status_code, retry_after=error.retry_after,
+            )
+
+
+@lru_cache(maxsize=32)
+def _cooldown_for(base_url: str, model: str, api_key: str | None) -> _Cooldown:
+    # A changed key, endpoint or model must not inherit an old configuration's error.
+    return _Cooldown()
+
+
+class FallbackClient:
+    """Gemini first, then Groq for quota, service or connection failures.
+
+    Each provider gets one attempt, avoiding stacked retry delays. The model
+    name describes the route for jobs and cache keys; each Completion retains
+    the actual model that answered. Model discovery always uses the primary.
+    """
+
+    def __init__(
+        self, primary: ChatClient, fallback: ChatClient, cooldown: _Cooldown
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self._cooldown = cooldown
+        self.model = f"{primary.model} -> {fallback.model}"
+        self.provider = primary.provider
+        self.base_url = primary.base_url
+
+    def complete(self, messages: list[dict[str, str]]) -> Completion:
+        started = time.perf_counter()
+        primary_error = self._cooldown.failure()
+        if primary_error is None:
+            try:
+                return self.primary.complete(messages)
+            except ProviderError as error:
+                if not error.retryable:
+                    raise
+                primary_error = error
+                self._cooldown.failed(error)
+                _LOG.warning(
+                    "Gemini temporarily unavailable (HTTP %s); using Groq fallback",
+                    error.status_code or "connection failure",
+                )
+
+        try:
+            completion = self.fallback.complete(messages)
+        except ProviderError as error:
+            raise ProviderError(
+                f"Gemini unavailable: {primary_error}. "
+                f"Groq fallback failed: {error}. "
+                "No AI result was produced. If quotas are exhausted, try again "
+                "after they reset; otherwise check the provider configuration.",
+                retryable=error.retryable,
+                status_code=error.status_code,
+                retry_after=error.retry_after,
+            ) from error
+        return replace(completion, latency=time.perf_counter() - started)
+
+    def list_models(self) -> list[str]:
+        return self.primary.list_models()
+
+    def close(self) -> None:
+        try:
+            self.primary.close()
+        finally:
+            self.fallback.close()
 
 
 def resolve_provider(name: str | None = None) -> Provider:
@@ -218,14 +336,19 @@ def create_client(
     max_tokens: int = 2048,
     timeout: float = 120.0,
     retries: int = 4,
-) -> ChatClient:
+    fallback: bool | None = None,
+) -> ChatClient | FallbackClient:
     """A client for one provider, with its key from the environment or from the
     engine's `.env` file. Settings are named after the provider: for Gemini,
     GEMINI_API_KEY, GEMINI_MODEL and GEMINI_BASE_URL.
 
     The model comes from the argument, then <PROVIDER>_MODEL, then the
     provider's default. <PROVIDER>_BASE_URL sends the requests elsewhere, such
-    as a gateway. A model on this computer is given longer to answer."""
+    as a gateway. A model on this computer is given longer to answer.
+
+    Gemini automatically falls back to Groq when GROQ_API_KEY is configured.
+    Set CODESYNC_FALLBACK=0, or pass fallback=False, to use one provider only.
+    Explicitly choosing another provider never adds a fallback."""
     chosen = resolve_provider(provider)
     api_key = chosen.key()
     if chosen.key_env and not api_key:
@@ -234,22 +357,51 @@ def create_client(
             f"or put it in {envfile.ENV_FILE}"
         )
 
-    return ChatClient(
+    fallback_enabled = fallback if fallback is not None else (
+        (setting("CODESYNC_FALLBACK", "1") or "1").strip().lower()
+        not in {"0", "false", "no", "off"}
+    )
+    groq = PROVIDERS["groq"]
+    use_fallback = fallback_enabled and chosen.name == "gemini" and bool(groq.key())
+    primary = ChatClient(
         setting(chosen.base_url_env) or chosen.base_url,
         model or setting(chosen.model_env) or chosen.model,
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=max(timeout, _LOCAL_TIMEOUT) if chosen.local else timeout,
-        retries=retries,
+        retries=0 if use_fallback else retries,
         provider=chosen,
     )
+    if not use_fallback:
+        return primary
+    try:
+        secondary = ChatClient(
+            setting(groq.base_url_env) or groq.base_url,
+            setting(groq.model_env) or groq.model,
+            api_key=groq.key(),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            retries=0,
+            provider=groq,
+        )
+        return FallbackClient(
+            primary, secondary,
+            _cooldown_for(primary.base_url, primary.model, api_key),
+        )
+    except Exception:
+        primary.close()
+        raise
 
 
 def _decode(url: str, response: httpx.Response) -> dict:
     if response.is_error:
         raise ProviderError(
-            f"{url} returned {response.status_code}: {_error_message(response)}"
+            f"{url} returned {response.status_code}: {_error_message(response)}",
+            retryable=response.status_code in _RETRY_STATUSES,
+            status_code=response.status_code,
+            retry_after=_retry_after(response),
         )
     try:
         return response.json()

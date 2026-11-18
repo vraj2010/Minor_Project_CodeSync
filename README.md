@@ -25,7 +25,7 @@ Minor project, B.Tech Semester 7 — 23BCP142 and 23BCP516D.
 | 1. Understanding code | 1–4 | Done: repository map, dependency map, usages, covering tests, `impact` |
 | 2. Bringing in the AI | 5–7 | Done: AI variable mapping, hosted web API, function rewriting as a diff |
 | 3. The safety checks | 8–11 | Done: contract, call-site, name, type and test checks, retry loop, undo |
-| 4. Interface and results | 12–14 | Interface and trap set done; the comparison is built but needs a Gemini key to run |
+| 4. Interface and results | 12–14 | Interface and trap set done; the comparison is built but live comparison results are still pending |
 
 ## How a change is checked
 
@@ -94,7 +94,7 @@ with Gemini and with DeepSeek-Coder, and the results file records which one ran.
 
 ```bash
 codesync compare --dry-run
-codesync compare --output results-gemini.json
+codesync compare --no-fallback --output results-gemini.json
 codesync compare --provider ollama --output results-deepseek-coder.json
 ```
 
@@ -210,7 +210,7 @@ When it fails it names the cause and what to try: a rejected key (Gemini answers
 400 or 401), access denied (403), a rate limit (429), a busy model (503), or no
 connection. A key containing spaces is flagged, since that is a placeholder and
 not a key. `annotate` prints the same explanation if a run fails. A busy or slow
-Gemini is retried up to four times, waiting longer each time; `--retries` changes
+Without fallback configured, Gemini is retried up to four times, waiting longer each time; `--retries` changes
 that.
 
 Google retires models, and a built-in default can go stale. If a model is refused
@@ -231,19 +231,69 @@ If a reply comes back empty with a finish reason of `length`, raise
 
 ### Choosing the model
 
-Gemini is the default. DeepSeek's own service and a model on your computer
-through Ollama work the same way, because all three serve the same chat API.
+Gemini is the default. Groq, DeepSeek's own service and a model on your computer
+through Ollama work the same way, because all four serve the same chat API.
 
 | Provider | What it needs | Default model |
 | --- | --- | --- |
 | `gemini` | `GEMINI_API_KEY` | `gemini-3.8-flash` |
 | `deepseek` | `DEEPSEEK_API_KEY`, from platform.deepseek.com (paid per token) | `deepseek-chat` |
 | `ollama` | Ollama running on this computer; no key, no cost | `deepseek-coder:6.7b` |
+| `groq` | `GROQ_API_KEY`, from console.groq.com/keys (free tier available) | `openai/gpt-oss-120b` |
 
 Choose one for a single run with `--provider`, or for every run with
 `CODESYNC_PROVIDER` in `engine/.env`. Each provider has its own settings, named
 after it: `DEEPSEEK_MODEL` and `DEEPSEEK_BASE_URL`, `OLLAMA_MODEL` and
-`OLLAMA_BASE_URL`, alongside Gemini's.
+`OLLAMA_BASE_URL`, and `GROQ_MODEL` and `GROQ_BASE_URL`, alongside Gemini's.
+
+### Gemini to Groq fallback for demonstrations
+
+Put both keys in `engine/.env` (never in the web app):
+
+```dotenv
+GEMINI_API_KEY=your-gemini-key
+GROQ_API_KEY=your-groq-key
+```
+
+With Gemini selected, configuring the Groq key automatically enables fallback
+for AI annotations and rewrites in both the CLI and web API. Gemini is tried
+first. On HTTP 429, 500, 502, 503 or 504, a timeout or a temporary connection
+failure, the same messages are sent to Groq using its own key and model.
+Each provider gets one attempt in this mode, so retry delays do not stack.
+Gemini is then skipped for at least 60 seconds, or longer if its `Retry-After`
+header asks for it. This cooldown is shared across jobs in the same engine
+process; after it expires, the next request tries Gemini again.
+
+Invalid keys, permission errors, unavailable models, malformed requests and
+unusable replies are reported directly. If Groq also fails, the result names
+both failures. Code acceptance still goes through the existing safety checks.
+Jobs show the configured model route, while each completion and annotation
+records the model that actually answered. Annotation caches for a fallback
+route are separate from caches for a single model.
+
+Check the route before a demo, or check each provider independently:
+
+```bash
+codesync check
+codesync check --no-fallback
+codesync check --provider groq --max-tokens 2048
+codesync models --provider groq
+```
+
+`GROQ_MODEL` selects a different model available to your Groq account. The
+[Groq model list](https://console.groq.com/docs/models) and
+[rate limits](https://console.groq.com/docs/rate-limits) describe current
+availability and allowances. Keep both accounts on their free tiers for a zero
+API budget; the application cannot determine your billing plan. Both providers
+can exhaust their quotas, and large code prompts may exceed Groq's free token
+limits. Fallback increases availability but does not guarantee a successful run.
+
+Use `--no-fallback` (or `CODESYNC_FALLBACK=0` in `engine/.env`) when measuring a
+specific model in comparison experiments. Selecting `--provider groq`,
+`deepseek` or `ollama` also uses only that provider. Without `GROQ_API_KEY`,
+Gemini keeps its existing retry behavior.
+
+### Running a local model
 
 ```
 CODESYNC_PROVIDER=ollama
