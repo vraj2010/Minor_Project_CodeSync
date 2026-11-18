@@ -126,7 +126,7 @@ def register(subcommands: argparse._SubParsersAction) -> None:
     check.set_defaults(handler=_cmd_check)
 
     models = subcommands.add_parser(
-        "models", help="list the Gemini models currently on offer"
+        "models", help="list the models the provider currently offers"
     )
     add_model_arguments(models)
     models.add_argument("--contains", help="only models whose name contains this text")
@@ -317,12 +317,17 @@ def _cmd_annotate(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     client = create_model_client(args)
-    key = setting(KEY_ENV, "") or ""
+    provider = getattr(client, "provider", None)
+    key_env = provider.key_env if provider else KEY_ENV
+    key = (setting(key_env, "") or "") if key_env else ""
 
     rows = [
-        ("model", client.model),
+        ("model", f"{client.model} ({provider.label})" if provider else client.model),
         ("address", client.base_url),
-        ("key", f"{KEY_ENV}, {plural(len(key), 'character')}"),
+        (
+            "key",
+            f"{key_env}, {plural(len(key), 'character')}" if key_env else "none needed",
+        ),
     ]
     if any(character.isspace() for character in key):
         rows.append(("warning", "the key contains spaces, so it is not a real key"))
@@ -334,14 +339,14 @@ def _cmd_check(args: argparse.Namespace) -> int:
     except ProviderError as error:
         print_rows(rows)
         print()
-        return _report_failure(error)
+        return _report_failure(error, provider.name if provider else None)
     finally:
         client.close()
 
     reply = " ".join(completion.text.split())[:40]
     rows.append(("reply", f'"{reply}" in {completion.latency:.1f}s'))
     print_rows(rows)
-    print("\nthe key works")
+    print("\nthe key works" if key_env else "\nthe model answers")
     return 0
 
 
@@ -350,7 +355,8 @@ def _cmd_models(args: argparse.Namespace) -> int:
     try:
         names = client.list_models()
     except ProviderError as error:
-        return _report_failure(error)
+        provider = getattr(client, "provider", None)
+        return _report_failure(error, provider.name if provider else None)
     finally:
         client.close()
 
@@ -361,13 +367,15 @@ def _cmd_models(args: argparse.Namespace) -> int:
         return 1
 
     print("\n".join(shown))
-    print(f"\n{plural(len(shown), 'model')}. Use one with --model, or set {MODEL_ENV}.")
+    provider = getattr(client, "provider", None)
+    model_env = provider.model_env if provider else MODEL_ENV
+    print(f"\n{plural(len(shown), 'model')}. Use one with --model, or set {model_env}.")
     return 0
 
 
-def _report_failure(error: ProviderError) -> int:
+def _report_failure(error: ProviderError, provider: str | None = None) -> int:
     print(f"failed: {error}")
-    hint = explain_error(str(error))
+    hint = explain_error(str(error), provider) if provider else explain_error(str(error))
     if hint:
         print(f"-> {hint}")
     return 1

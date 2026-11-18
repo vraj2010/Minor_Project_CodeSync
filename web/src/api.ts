@@ -78,6 +78,9 @@ export interface Report {
 
 export interface VerifyResult {
   changed: boolean;
+  /** Id of the checked rewrite, for applying it or downloading it as a patch. */
+  change?: string;
+  path?: string;
   diff: string;
   report: Report | null;
 }
@@ -92,6 +95,8 @@ export interface Attempt {
 
 export interface Improvement {
   target: string;
+  change: string | null;
+  path: string | null;
   decision: "kept" | "refused" | "unchanged" | "failed";
   reason: string;
   before: string;
@@ -109,6 +114,30 @@ export interface Job {
   error: string | null;
 }
 
+export interface AppliedChange {
+  id: string;
+  path: string;
+  target: string;
+  applied_at: string;
+}
+
+export interface ApplyResult {
+  applied: AppliedChange;
+  message: string;
+  history: AppliedChange[];
+}
+
+export interface UndoResult {
+  undone: AppliedChange;
+  message: string;
+  history: AppliedChange[];
+}
+
+export interface PatchFile {
+  name: string;
+  text: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -123,6 +152,11 @@ async function request<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  const response = await send(connection, path, init);
+  return response.status === 204 ? (undefined as T) : response.json();
+}
+
+async function send(connection: Connection, path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   if (connection.apiKey) headers.set("X-API-Key", connection.apiKey);
 
@@ -137,7 +171,12 @@ async function request<T>(
   if (!response.ok) {
     throw new ApiError(await errorMessage(response), response.status);
   }
-  return response.status === 204 ? (undefined as T) : response.json();
+  return response;
+}
+
+function attachmentName(response: Response, fallback: string): string {
+  const match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "");
+  return match?.[1] ?? fallback;
 }
 
 async function errorMessage(response: Response): Promise<string> {
@@ -197,4 +236,21 @@ export const api = {
     request<Job>(c, `/v1/projects/${id}/improve`, json({ target, goal })),
 
   job: (c: Connection, id: string) => request<Job>(c, `/v1/jobs/${id}`),
+
+  apply: (c: Connection, id: string, change: string) =>
+    request<ApplyResult>(c, `/v1/projects/${id}/apply`, json({ change })),
+
+  undo: (c: Connection, id: string) =>
+    request<UndoResult>(c, `/v1/projects/${id}/undo`, json({})),
+
+  applied: (c: Connection, id: string) =>
+    request<AppliedChange[]>(c, `/v1/projects/${id}/applied`),
+
+  async patch(c: Connection, id: string, change: string): Promise<PatchFile> {
+    const response = await send(
+      c,
+      `/v1/projects/${id}/patch?change=${encodeURIComponent(change)}`,
+    );
+    return { name: attachmentName(response, "change.patch"), text: await response.text() };
+  },
 };

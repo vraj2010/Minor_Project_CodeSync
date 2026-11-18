@@ -83,9 +83,11 @@ class Comparison:
     model: str
     tallies: dict[str, Tally] = field(default_factory=dict)
     runs: list[dict] = field(default_factory=list)
+    provider: str | None = None
 
     def to_dict(self) -> dict:
         return {
+            "provider": self.provider,
             "model": self.model,
             "arms": {name: item.to_dict() for name, item in self.tallies.items()},
             "runs": self.runs,
@@ -124,7 +126,12 @@ def run_comparison(
     options = options or VerifyOptions(python=sys.executable)
     index = build_index(trapset.project)
     resolver = Resolver(index)
-    comparison = Comparison(client.model, {arm.name: Tally() for arm in arms})
+    provider = getattr(client, "provider", None)
+    comparison = Comparison(
+        client.model,
+        {arm.name: Tally() for arm in arms},
+        provider=provider.name if provider else None,
+    )
     verdicts: dict[str, list[str]] = {}
 
     with Sandbox(trapset.project) as sandbox:

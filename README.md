@@ -87,12 +87,15 @@ codesync traps              # score the checks
 
 The four-way comparison runs the same 24 tasks with a plain model, then adding the
 project map, the checks and the retry loop, and counts how often each one keeps a
-change that quietly breaks the project. It needs a Gemini key, so it has no
-results yet. `--dry-run` shows the cost first.
+change that quietly breaks the project. It has no results yet. `--dry-run` shows
+the cost first. It runs with any provider (see
+[Choosing the model](#choosing-the-model)), so the same comparison can be made
+with Gemini and with DeepSeek-Coder, and the results file records which one ran.
 
 ```bash
 codesync compare --dry-run
-codesync compare --output results.json
+codesync compare --output results-gemini.json
+codesync compare --provider ollama --output results-deepseek-coder.json
 ```
 
 ## Phase 2 — the AI variable map
@@ -156,8 +159,9 @@ environment cannot be moved or copied; delete `.venv` and create it again.
 
 ### Connecting Gemini
 
-CodeSync calls Google's Gemini; nothing runs locally. Create a key at
-aistudio.google.com/apikey (the free tier needs no card).
+CodeSync calls Google's Gemini by default; DeepSeek and a free local model
+through Ollama are covered in [Choosing the model](#choosing-the-model). Create
+a Gemini key at aistudio.google.com/apikey (the free tier needs no card).
 
 Copy `engine/.env.example` to `engine/.env` and paste the key after the equals
 sign. Every command then finds it, from any folder and in any terminal. Git
@@ -224,6 +228,51 @@ $env:GEMINI_MODEL = "a-model-from-that-list"
 A model that thinks before it answers spends part of its token budget doing so.
 If a reply comes back empty with a finish reason of `length`, raise
 `--max-tokens`.
+
+### Choosing the model
+
+Gemini is the default. DeepSeek's own service and a model on your computer
+through Ollama work the same way, because all three serve the same chat API.
+
+| Provider | What it needs | Default model |
+| --- | --- | --- |
+| `gemini` | `GEMINI_API_KEY` | `gemini-3.8-flash` |
+| `deepseek` | `DEEPSEEK_API_KEY`, from platform.deepseek.com (paid per token) | `deepseek-chat` |
+| `ollama` | Ollama running on this computer; no key, no cost | `deepseek-coder:6.7b` |
+
+Choose one for a single run with `--provider`, or for every run with
+`CODESYNC_PROVIDER` in `engine/.env`. Each provider has its own settings, named
+after it: `DEEPSEEK_MODEL` and `DEEPSEEK_BASE_URL`, `OLLAMA_MODEL` and
+`OLLAMA_BASE_URL`, alongside Gemini's.
+
+```
+CODESYNC_PROVIDER=ollama
+OLLAMA_MODEL=deepseek-coder:6.7b
+```
+
+To run DeepSeek-Coder for free on your own computer, install Ollama from
+ollama.com, then:
+
+```bash
+ollama pull deepseek-coder:6.7b
+codesync check --provider ollama
+```
+
+```
+model    deepseek-coder:6.7b (Ollama)
+address  http://localhost:11434/v1
+key      none needed
+reply    "OK" in 4.2s
+
+the model answers
+```
+
+Model sizes trade quality for speed and memory: `deepseek-coder:1.3b` runs
+almost anywhere but rewrites poorly, `6.7b` needs about 8 GB of memory, and
+`33b` needs a strong GPU or about 32 GB. A model on your computer is given ten
+minutes per answer instead of two, because without a GPU it is slow. Ollama
+also cuts off long prompts at its context length; if a function's context is
+large, start Ollama with a larger `OLLAMA_CONTEXT_LENGTH` (for example 8192).
 
 ## Using the engine
 

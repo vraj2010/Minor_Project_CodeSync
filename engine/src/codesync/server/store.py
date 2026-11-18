@@ -3,19 +3,22 @@
 import secrets
 import shutil
 import threading
+from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..annotate import AnnotationCache
 from ..index import ProjectIndex, build_index
 from ..resolve import Resolver
+from ..splice import Patch
 from ..varmap import VariableMap
 from ..varscan import build_variable_table
 from .settings import Settings
 
 MARKER = ".codesync-project"
+_KEPT_CHANGES = 50
 
 
 class NotFound(LookupError):
@@ -24,6 +27,29 @@ class NotFound(LookupError):
 
 class LimitReached(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class CheckedChange:
+    """A rewrite the checks have looked at, kept so it can be applied or
+    downloaded without being sent again. `revision` is the version of the
+    project it was checked against."""
+
+    id: str
+    target: str
+    patch: Patch
+    verdict: str | None
+    revision: int
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """One consistent view of a project, for work that must not see it change
+    halfway through."""
+
+    index: ProjectIndex
+    resolver: Resolver
+    revision: int
 
 
 @dataclass
@@ -38,6 +64,63 @@ class ProjectState:
     resolver: Resolver
     variable_map: VariableMap
     cache: AnnotationCache
+    revision: int = 0
+    checked: "OrderedDict[str, CheckedChange]" = field(default_factory=OrderedDict)
+    lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+
+    @property
+    def journal(self) -> Path:
+        """Where applied changes are recorded, outside the uploaded code so it
+        never shows up in it."""
+        return self.path / "applied"
+
+    def snapshot(self) -> Snapshot:
+        with self.lock:
+            return Snapshot(self.index, self.resolver, self.revision)
+
+    def remember(
+        self, target: str, patch: Patch, verdict: str | None, revision: int
+    ) -> CheckedChange:
+        change = CheckedChange(
+            secrets.token_urlsafe(9), target, patch, verdict, revision
+        )
+        with self.lock:
+            self.checked[change.id] = change
+            while len(self.checked) > _KEPT_CHANGES:
+                self.checked.popitem(last=False)
+        return change
+
+    def checked_change(self, change_id: str | None) -> CheckedChange:
+        """A checked change by id, or the newest one when no id is given."""
+        with self.lock:
+            if change_id is None:
+                if not self.checked:
+                    raise NotFound("no rewrite has been checked yet")
+                return next(reversed(self.checked.values()))
+            change = self.checked.get(change_id)
+        if change is None:
+            raise NotFound(f"no checked rewrite has the id {change_id}")
+        return change
+
+    def reload(self) -> None:
+        """Read the project again after one of its files changed. Every verdict
+        given before was about the old code, so the revision moves on and those
+        changes can no longer be applied. Descriptions of variables are kept."""
+        index = build_index(self.index.root)
+        resolver = Resolver(index)
+        table = build_variable_table(index, resolver)
+        with self.lock:
+            old = self.variable_map
+            self.variable_map = VariableMap(
+                old.root,
+                table,
+                annotations=dict(old.annotations),
+                usage=old.usage,
+                model=old.model,
+            )
+            self.index = index
+            self.resolver = resolver
+            self.revision += 1
 
     def source_line(self, relpath: str, lineno: int) -> str:
         lines = self.resolver.source(relpath).split("\n")

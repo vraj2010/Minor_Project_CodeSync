@@ -692,3 +692,36 @@ def test_serve_starts_the_app(capsys, monkeypatch, tmp_path):
     assert code == 0
     assert (started["host"], started["port"]) == ("0.0.0.0", 9123)
     assert started["app"].title == "CodeSync"
+
+
+def test_the_provider_can_be_chosen_on_the_command_line(capsys, monkeypatch, annotator):
+    seen = {}
+
+    def fake_create_client(**kwargs):
+        seen.update(kwargs)
+        client = annotator()
+        client.base_url = "http://localhost:11434/v1"
+        return client
+
+    monkeypatch.setattr("codesync.cliargs.create_client", fake_create_client)
+
+    run(capsys, "check", "--provider", "ollama")
+
+    assert seen["provider"] == "ollama"
+
+
+def test_an_unreachable_ollama_is_explained():
+    from codesync.cliargs import explain_error
+
+    hint = explain_error("could not reach http://localhost:11434/v1", "ollama")
+
+    assert "ollama serve" in hint
+    assert "ollama pull deepseek-coder:6.7b" in hint
+
+
+def test_a_rejected_deepseek_key_points_to_deepseek():
+    from codesync.cliargs import explain_error
+
+    hint = explain_error("x returned 401: Authentication Fails", "deepseek")
+
+    assert "platform.deepseek.com" in hint

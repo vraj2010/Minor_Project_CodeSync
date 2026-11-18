@@ -113,6 +113,7 @@ def hide_the_real_key_file(monkeypatch):
     """A developer's own `.env` must never reach a test: tests would stop being
     repeatable, and one that reached the network would spend real quota."""
     monkeypatch.setattr(envfile, "ENV_FILE", Path("no-such-folder") / ".env")
+    monkeypatch.delenv("CODESYNC_PROVIDER", raising=False)
 
 
 @pytest.fixture

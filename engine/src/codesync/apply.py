@@ -45,6 +45,15 @@ class AppliedChange:
             "patched_digest": self.patched_digest,
         }
 
+    def summary(self) -> dict:
+        """What a client is shown: everything but the saved bytes."""
+        return {
+            "id": self.id,
+            "path": self.relpath,
+            "target": self.target,
+            "applied_at": self.applied_at,
+        }
+
     @classmethod
     def from_dict(cls, data: dict) -> "AppliedChange":
         return cls(
@@ -57,9 +66,12 @@ class AppliedChange:
         )
 
 
-def apply_patch(root: Path, patch: Patch, target: str) -> AppliedChange:
+def apply_patch(
+    root: Path, patch: Patch, target: str, *, journal: Path | None = None
+) -> AppliedChange:
     """Write `patch` to the project, refusing if the file is no longer what the
-    patch was made from."""
+    patch was made from. The journal lives under the project unless another
+    folder is given."""
     path = _inside(root, patch.relpath)
     try:
         if read_exact_source(path) != patch.original:
@@ -81,7 +93,7 @@ def apply_patch(root: Path, patch: Patch, target: str) -> AppliedChange:
         patched_digest=_digest(patched),
     )
 
-    journal = root / JOURNAL
+    journal = journal or root / JOURNAL
     journal.mkdir(parents=True, exist_ok=True)
     entry = journal / f"{change.id}.json"
     entry.write_text(json.dumps(change.to_dict()), encoding="utf-8")
@@ -93,10 +105,13 @@ def apply_patch(root: Path, patch: Patch, target: str) -> AppliedChange:
     return change
 
 
-def undo(root: Path, change_id: str | None = None) -> AppliedChange:
+def undo(
+    root: Path, change_id: str | None = None, *, journal: Path | None = None
+) -> AppliedChange:
     """Put a file back exactly as it was. Without an id, the newest change is
     the one undone."""
-    changes = list_applied(root)
+    journal = journal or root / JOURNAL
+    changes = list_applied(root, journal=journal)
     if not changes:
         raise ApplyError("no applied change to undo")
     if change_id is None:
@@ -124,13 +139,13 @@ def undo(root: Path, change_id: str | None = None) -> AppliedChange:
             "undoing it would lose that edit; nothing was changed"
         )
     _write(path, change.original)
-    (root / JOURNAL / f"{change.id}.json").unlink(missing_ok=True)
+    (journal / f"{change.id}.json").unlink(missing_ok=True)
     return change
 
 
-def list_applied(root: Path) -> list[AppliedChange]:
+def list_applied(root: Path, *, journal: Path | None = None) -> list[AppliedChange]:
     """Applied changes that can still be undone, oldest first."""
-    journal = root / JOURNAL
+    journal = journal or root / JOURNAL
     if not journal.is_dir():
         return []
     return sorted(
