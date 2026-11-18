@@ -3,7 +3,7 @@ import type { Attempt, CheckResult, Report, Verdict } from "../api";
 const HEADLINES: Record<Verdict, { title: string; text: string }> = {
   safe: {
     title: "Safe to keep",
-    text: "Every check passed, including the tests that cover this function.",
+    text: "The checks found no new failures in this rewrite.",
   },
   unsafe: {
     title: "Refused",
@@ -11,7 +11,7 @@ const HEADLINES: Record<Verdict, { title: string; text: string }> = {
   },
   unconfirmed: {
     title: "Not confirmed",
-    text: "Nothing failed, but the change could not be proved safe.",
+    text: "CodeSync needs more evidence before it can approve this change.",
   },
 };
 
@@ -38,12 +38,13 @@ interface Props {
 export function ReportView({ report, attempts, reason }: Props) {
   const headline = HEADLINES[report.verdict];
   const findings = report.checks.flatMap((item) => item.findings);
+  const testResult = report.checks.find((item) => item.check === "tests");
 
   return (
     <section className={`report report-${report.verdict}`} aria-live="polite">
       <header>
         <h3>{headline.title}</h3>
-        <p>{reason ?? headline.text}</p>
+        <p>{report.verdict === "unconfirmed" && report.notes.length ? headline.text : reason ?? headline.text}</p>
       </header>
 
       {attempts && attempts.length > 1 && (
@@ -68,6 +69,8 @@ export function ReportView({ report, attempts, reason }: Props) {
           </li>
         ))}
       </ul>
+
+      {testResult?.status === "passed" && testResult.detail && <p>{testResult.detail}</p>}
 
       {report.places.length > 0 && (
         <div className="damage">

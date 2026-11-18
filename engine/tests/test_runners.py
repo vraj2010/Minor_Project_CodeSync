@@ -4,6 +4,14 @@ import sys
 from codesync.runners import run_pytest
 
 
+def test_missing_import_during_collection_names_module_without_temp_traceback(tmp_path):
+    (tmp_path / "conftest.py").write_text("import codesync_absent_dependency\n")
+    run = run_pytest(tmp_path, None, python=sys.executable, timeout=30)
+    assert run.total == 0
+    assert "could not import 'codesync_absent_dependency'" in run.problem
+    assert str(tmp_path) not in run.problem
+
+
 def test_a_file_still_locked_after_a_timeout_does_not_crash_the_check(
     tmp_path, monkeypatch
 ):

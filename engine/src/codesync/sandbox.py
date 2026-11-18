@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
-from .discovery import DEFAULT_EXCLUDES
+from .discovery import DEFAULT_EXCLUDES, discover
 from .parsing import encode_like
 
 _SECRET_NAME = re.compile(
@@ -71,12 +71,34 @@ def clean_environment(
         for name, value in source.items()
         if not _SECRET_NAME.search(name)
     }
-    paths = [str(root)]
-    if (root / "src").is_dir():
-        paths.insert(0, str(root / "src"))
-    env["PYTHONPATH"] = os.pathsep.join(paths)
+    env["PYTHONPATH"] = os.pathsep.join(str(path) for path in import_roots(root))
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
+
+
+def import_roots(root: Path) -> list[Path]:
+    """Folders the project's code is imported from, most specific first.
+
+    A file's import root is the folder above its topmost package, so a library
+    kept at `requests/src/requests/` is imported from `requests/src`, wherever
+    that sits in the upload. Placing these ahead of site-packages also means an
+    installed copy of the library can never stand in for the project's own."""
+    root = root.resolve()
+    found: dict[Path, None] = {}
+    try:
+        files = discover(root)
+    except OSError:
+        files = []
+    for source in files:
+        directory = source.path.parent
+        while directory != root and (directory / "__init__.py").is_file():
+            directory = directory.parent
+        found[directory] = None
+    if (root / "src").is_dir():
+        found[root / "src"] = None
+    found.pop(root, None)
+    ordered = sorted(found, key=lambda path: (-len(path.parts), str(path)))
+    return [*ordered, root]
 
 
 def find_python(root: Path) -> str:

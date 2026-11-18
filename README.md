@@ -483,6 +483,14 @@ out, the prompt, the reply, token counts and the diff.
 Pick a function, see what depends on it, then rewrite it in a side-by-side editor
 and check the result. Checking your own version needs no Gemini key.
 
+For the local Requests demo, install the sample's test dependencies once
+from the repository root. With local test execution enabled, the engine gives
+the original suite and the rewritten suite up to five minutes each.
+
+```powershell
+.\engine\.venv\Scripts\python.exe -m pip install -r engine/scripts/requirements-requests-demo.txt
+```
+
 In one terminal, start the engine for local use:
 
 ```powershell
@@ -523,7 +531,7 @@ codesync serve
 | `CODESYNC_MAX_REQUESTS_PER_JOB` | model requests one job may make, default 300 |
 | `CODESYNC_DAILY_REQUESTS` | model requests per key per day, default 2000 |
 | `CODESYNC_RUN_TESTS` | `1` to run uploaded code's tests; only allowed with `CODESYNC_ALLOW_ANONYMOUS` |
-| `CODESYNC_CHECK_TIMEOUT` | seconds each slow check may take, default 60 |
+| `CODESYNC_CHECK_TIMEOUT` | seconds each slow check may take, default 300 with local tests enabled, otherwise 60 |
 
 | Endpoint | Purpose |
 | --- | --- |

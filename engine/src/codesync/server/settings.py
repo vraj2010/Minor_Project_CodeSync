@@ -63,7 +63,7 @@ class Settings:
             cors_origins=tuple(item for item in origins if item),
             github_token=env.get("GITHUB_TOKEN") or None,
             run_tests=run_tests,
-            check_timeout=_number(env, "CODESYNC_CHECK_TIMEOUT", 60),
+            check_timeout=_number(env, "CODESYNC_CHECK_TIMEOUT", 300 if run_tests else 60),
             concurrent_checks=_number(env, "CODESYNC_CONCURRENT_CHECKS", 2),
         )
 
