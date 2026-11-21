@@ -11,7 +11,7 @@ RUN useradd --create-home --uid 1000 codesync \
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --no-cache-dir ".[server]"
+RUN pip install --no-cache-dir ".[server,verify]" urllib3 certifi idna charset-normalizer pytest-mock
 
 USER codesync
 EXPOSE 8000
